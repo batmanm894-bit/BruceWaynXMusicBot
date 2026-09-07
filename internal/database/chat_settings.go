@@ -30,18 +30,19 @@ type RTMPConfig struct {
 }
 
 type ChatSettings struct {
-	ChatID                int64      `bson:"_id"`
-	ChannelPlayID         int64      `bson:"cplay_id"`
-	AuthUsers             []int64    `bson:"auth_users"`
-	AdminMode             AdminMode  `bson:"admin_mode,omitempty"`
-	Language              string     `bson:"language"`
-	RTMP                  RTMPConfig `bson:"rtmp_config"`
-	AssistantIndex        int        `bson:"ass_index,omitempty"`
-	PlayModeAdminsOnly    bool       `bson:"play_mode"`
-	CommandDelete         bool       `bson:"cmd_delete"`
-	CleanMode             bool       `bson:"clean_mode"`
-	CleanModeDurationMins int        `bson:"clean_mode_duration_mins"`
-	Autoplay              bool       `bson:"autoplay"`
+	ChatID                int64         `bson:"_id"`
+	ChannelPlayID         int64         `bson:"cplay_id"`
+	AuthUsers             []int64       `bson:"auth_users"`
+	AdminMode             AdminMode     `bson:"admin_mode,omitempty"`
+	Language              string        `bson:"language"`
+	RTMP                  RTMPConfig    `bson:"rtmp_config"`
+	AssistantIndex        int           `bson:"ass_index,omitempty"`
+	PlayModeAdminsOnly    bool          `bson:"play_mode"`
+	CommandDelete         bool          `bson:"cmd_delete"`
+	CleanMode             bool          `bson:"clean_mode"`
+	CleanModeDurationMins int           `bson:"clean_mode_duration_mins"`
+	Autoplay              bool          `bson:"autoplay"`
+	Warns                 map[int64]int `bson:"warns,omitempty"`
 }
 
 func defaultChatSettings(chatID int64) *ChatSettings {
