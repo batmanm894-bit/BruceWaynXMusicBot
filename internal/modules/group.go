@@ -46,23 +46,23 @@ func warnHandler(m *tg.NewMessage) error {
 	chatID := m.ChannelID()
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi ko warn karne ke liye uske message par reply karo ya ID/username do.")
+		m.Reply("Reply to the user's message or give an ID/username to warn them.")
 		return tg.ErrEndGroup
 	}
 
 	count, err := database.AddWarn(chatID, userID)
 	if err != nil {
-		m.Reply("Warn save karne me error: " + err.Error())
+		m.Reply("Failed to save warn: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
 	if count >= maxWarnLimit {
 		database.ResetWarn(chatID, userID)
-		m.Reply(fmt.Sprintf("⚠️ User ko %d warnings mil chuke — limit cross ho gayi. (Auto-kick/ban abhi enabled nahi hai, manually action lo.)", maxWarnLimit))
+		m.Reply(fmt.Sprintf("⚠️ User has reached %d warnings — limit exceeded. (Auto-kick/ban is not enabled yet, take manual action.)", maxWarnLimit))
 		return tg.ErrEndGroup
 	}
 
-	m.Reply(fmt.Sprintf("⚠️ Warning diya gaya. (%d/%d)", count, maxWarnLimit))
+	m.Reply(fmt.Sprintf("⚠️ Warning issued. (%d/%d)", count, maxWarnLimit))
 	return tg.ErrEndGroup
 }
 
@@ -70,7 +70,7 @@ func warningsHandler(m *tg.NewMessage) error {
 	chatID := m.ChannelID()
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kis user ke warnings dekhne hai, uske message par reply karo ya ID/username do.")
+		m.Reply("Reply to the user's message or give an ID/username to check their warnings.")
 		return tg.ErrEndGroup
 	}
 
@@ -80,7 +80,7 @@ func warningsHandler(m *tg.NewMessage) error {
 		return tg.ErrEndGroup
 	}
 
-	m.Reply(fmt.Sprintf("Is user ke pass %d/%d warnings hai.", count, maxWarnLimit))
+	m.Reply(fmt.Sprintf("This user has %d/%d warnings.", count, maxWarnLimit))
 	return tg.ErrEndGroup
 }
 
@@ -88,7 +88,7 @@ func resetwarnHandler(m *tg.NewMessage) error {
 	chatID := m.ChannelID()
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kis user ke warnings reset karne hai, uske message par reply karo ya ID/username do.")
+		m.Reply("Reply to the user's message or give an ID/username to reset their warnings.")
 		return tg.ErrEndGroup
 	}
 
@@ -97,23 +97,23 @@ func resetwarnHandler(m *tg.NewMessage) error {
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("✅ Warnings reset kar diye gaye.")
+	m.Reply("✅ Warnings have been reset.")
 	return tg.ErrEndGroup
 }
 
 func pinHandler(m *tg.NewMessage) error {
 	reply, err := m.GetReplyMessage()
 	if err != nil || reply == nil {
-		m.Reply("Jis message ko pin karna hai, uspar reply karo.")
+		m.Reply("Reply to the message you want to pin.")
 		return tg.ErrEndGroup
 	}
 
 	if _, err := m.Client.PinMessage(m.ChannelID(), reply.ID, &tg.PinOptions{Silent: false}); err != nil {
-		m.Reply("Pin karne me error: " + err.Error())
+		m.Reply("Failed to pin: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("📌 Message pin kar diya gaya.")
+	m.Reply("📌 Message has been pinned.")
 	return tg.ErrEndGroup
 }
 
@@ -125,18 +125,18 @@ func unpinHandler(m *tg.NewMessage) error {
 	}
 
 	if _, err := m.Client.UnpinMessage(m.ChannelID(), msgID); err != nil {
-		m.Reply("Unpin karne me error: " + err.Error())
+		m.Reply("Failed to unpin: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("📌 Message unpin kar diya gaya.")
+	m.Reply("📌 Message has been unpinned.")
 	return tg.ErrEndGroup
 }
 
 func purgeHandler(m *tg.NewMessage) error {
 	reply, err := m.GetReplyMessage()
 	if err != nil || reply == nil {
-		m.Reply("Jaha se purge start karna hai, us message par reply karke /purge bhejo.")
+		m.Reply("Reply to the message you want to start purging from, then send /purge.")
 		return tg.ErrEndGroup
 	}
 
@@ -147,12 +147,12 @@ func purgeHandler(m *tg.NewMessage) error {
 	}
 
 	if len(ids) == 0 {
-		m.Reply("Kuch delete karne layak nahi mila.")
+		m.Reply("Nothing found to delete.")
 		return tg.ErrEndGroup
 	}
 
 	if _, err := core.Bot.DeleteMessages(chatID, ids); err != nil {
-		m.Reply("Purge karne me error: " + err.Error())
+		m.Reply("Failed to purge: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
