@@ -39,6 +39,8 @@ type BotState struct {
 	Served        UsersChats  `bson:"served"`
 	Sudoers       []int64     `bson:"sudoers"`
 	Blacklisted   UsersChats  `bson:"blacklisted"`
+	Gbanned       []int64     `bson:"gbanned"`
+	Gmuted        []int64     `bson:"gmuted"`
 	AutoLeave     bool        `bson:"autoleave"`
 	LoggerEnabled bool        `bson:"logger"`
 	Maintenance   Maintenance `bson:"maint,omitempty"`
@@ -63,6 +65,8 @@ func newDefaultBotState() *BotState {
 			Chats: []int64{},
 		},
 		Sudoers:       []int64{},
+		Gbanned:       []int64{},
+		Gmuted:        []int64{},
 		LoggerEnabled: true,
 	}
 
