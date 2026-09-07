@@ -41,28 +41,28 @@ func init() {
 func gbanHandler(m *tg.NewMessage) error {
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi valid user ko specify karo (reply karke ya ID/username dekar).")
+		m.Reply("Please specify a valid user (reply to their message or give an ID/username).")
 		return tg.ErrEndGroup
 	}
 
 	if already, _ := database.IsGbanned(userID); already {
-		m.Reply("Ye user pehle se hi gbanned hai.")
+		m.Reply("This user is already globally banned.")
 		return tg.ErrEndGroup
 	}
 
 	if err := database.AddGban(userID); err != nil {
-		m.Reply("Gban save karne me error: " + err.Error())
+		m.Reply("Failed to save gban: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("✅ User globally banned kar diya gaya — ab wo kisi bhi chat me bot use nahi kar payega.")
+	m.Reply("✅ User has been globally banned — they can no longer use the bot in any chat.")
 	return tg.ErrEndGroup
 }
 
 func ungbanHandler(m *tg.NewMessage) error {
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi valid user ko specify karo (reply karke ya ID/username dekar).")
+		m.Reply("Please specify a valid user (reply to their message or give an ID/username).")
 		return tg.ErrEndGroup
 	}
 
@@ -72,44 +72,44 @@ func ungbanHandler(m *tg.NewMessage) error {
 		return tg.ErrEndGroup
 	}
 	if !removed {
-		m.Reply("Ye user gbanned nahi hai.")
+		m.Reply("This user is not globally banned.")
 		return tg.ErrEndGroup
 	}
 
 	if err := database.RemoveGban(userID); err != nil {
-		m.Reply("Gban hatane me error: " + err.Error())
+		m.Reply("Failed to remove gban: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("✅ Global ban hata diya gaya.")
+	m.Reply("✅ Global ban has been removed.")
 	return tg.ErrEndGroup
 }
 
 func gmuteHandler(m *tg.NewMessage) error {
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi valid user ko specify karo (reply karke ya ID/username dekar).")
+		m.Reply("Please specify a valid user (reply to their message or give an ID/username).")
 		return tg.ErrEndGroup
 	}
 
 	if already, _ := database.IsGmuted(userID); already {
-		m.Reply("Ye user pehle se hi gmuted hai.")
+		m.Reply("This user is already globally muted.")
 		return tg.ErrEndGroup
 	}
 
 	if err := database.AddGmute(userID); err != nil {
-		m.Reply("Gmute save karne me error: " + err.Error())
+		m.Reply("Failed to save gmute: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("✅ User globally mute kar diya gaya — ab wo kisi bhi chat me playback commands use nahi kar payega.")
+	m.Reply("✅ User has been globally muted — they can no longer use playback commands in any chat.")
 	return tg.ErrEndGroup
 }
 
 func ungmuteHandler(m *tg.NewMessage) error {
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi valid user ko specify karo (reply karke ya ID/username dekar).")
+		m.Reply("Please specify a valid user (reply to their message or give an ID/username).")
 		return tg.ErrEndGroup
 	}
 
@@ -119,16 +119,16 @@ func ungmuteHandler(m *tg.NewMessage) error {
 		return tg.ErrEndGroup
 	}
 	if !removed {
-		m.Reply("Ye user gmuted nahi hai.")
+		m.Reply("This user is not globally muted.")
 		return tg.ErrEndGroup
 	}
 
 	if err := database.RemoveGmute(userID); err != nil {
-		m.Reply("Gmute hatane me error: " + err.Error())
+		m.Reply("Failed to remove gmute: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("✅ Global mute hata diya gaya.")
+	m.Reply("✅ Global mute has been removed.")
 	return tg.ErrEndGroup
 }
 
