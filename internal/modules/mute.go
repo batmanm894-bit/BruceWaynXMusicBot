@@ -28,30 +28,6 @@ import (
 	"main/internal/utils"
 )
 
-func init() {
-	helpTexts["/mute"] = `<i>Mute the audio output in voice chat.</i>
-
-<u>Usage:</u>
-<b>/mute</b> — Mute indefinitely
-<b>/mute [seconds]</b> — Mute with auto-unmute timer
-
-<b>⚙️ Features:</b>
-• Audio continues playing (progress tracked)
-• Auto-unmute timer support (5-3600 seconds)
-
-<b>💡 Examples:</b>
-<code>/mute</code> — Mute until manual unmute
-<code>/mute 60</code> — Mute for 60 seconds
-
-<b>⚠️ Notes:</b>
-• Track continues playing in background
-• Use <code>/unmute</code> to restore audio`
-}
-
-func muteHandler(m *tg.NewMessage) error {
-	return handleMute(m, false)
-}
-
 func cmuteHandler(m *tg.NewMessage) error {
 	return handleMute(m, true)
 }
