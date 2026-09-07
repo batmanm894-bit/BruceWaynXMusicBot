@@ -46,7 +46,7 @@ func banHandler(m *tg.NewMessage) error {
 		return tg.ErrEndGroup
 	}
 
-	if _, err := m.Client.EditBannedBuilder(chatID, userID).Ban(0).Invoke(); err != nil {
+	if _, err := m.Client.EditBannedBuilder(chatID, userID).Ban(0); err != nil {
 		m.Reply("Ban karne me error: " + err.Error())
 		return tg.ErrEndGroup
 	}
@@ -63,7 +63,7 @@ func unbanHandler(m *tg.NewMessage) error {
 		return tg.ErrEndGroup
 	}
 
-	if _, err := m.Client.EditBannedBuilder(chatID, userID).Unban().Invoke(); err != nil {
+	if _, err := m.Client.EditBannedBuilder(chatID, userID).Unban(); err != nil {
 		m.Reply("Unban karne me error: " + err.Error())
 		return tg.ErrEndGroup
 	}
@@ -97,7 +97,7 @@ func promoteHandler(m *tg.NewMessage) error {
 		return tg.ErrEndGroup
 	}
 
-	if _, err := m.Client.EditAdminBuilder(chatID, userID).Promote().Invoke(); err != nil {
+	if _, err := m.Client.EditAdminBuilder(chatID, userID).Promote(); err != nil {
 		m.Reply("Promote karne me error: " + err.Error())
 		return tg.ErrEndGroup
 	}
@@ -114,7 +114,7 @@ func demoteHandler(m *tg.NewMessage) error {
 		return tg.ErrEndGroup
 	}
 
-	if _, err := m.Client.EditAdminBuilder(chatID, userID).Demote().Invoke(); err != nil {
+	if _, err := m.Client.EditAdminBuilder(chatID, userID).Demote(); err != nil {
 		m.Reply("Demote karne me error: " + err.Error())
 		return tg.ErrEndGroup
 	}
