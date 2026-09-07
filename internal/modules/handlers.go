@@ -109,6 +109,83 @@ var handlers = []MsgHandlerDef{
 	},
 
 	{
+		Pattern: "warn",
+		Handler: warnHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "(warnings|warns)",
+		Handler: warningsHandler,
+		Filters: []telegram.Filter{superGroupFilter},
+	},
+	{
+		Pattern: "resetwarn",
+		Handler: resetwarnHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "pin",
+		Handler: pinHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "unpin",
+		Handler: unpinHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "purge",
+		Handler: purgeHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "ban",
+		Handler: banHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "unban",
+		Handler: unbanHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "kick",
+		Handler: kickHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "promote",
+		Handler: promoteHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "demote",
+		Handler: demoteHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+
+	{
+		Pattern: "gban",
+		Handler: gbanHandler,
+		Filters: []telegram.Filter{sudoOnlyFilter},
+	},
+	{
+		Pattern: "ungban",
+		Handler: ungbanHandler,
+		Filters: []telegram.Filter{sudoOnlyFilter},
+	},
+	{
+		Pattern: "gmute",
+		Handler: gmuteHandler,
+		Filters: []telegram.Filter{sudoOnlyFilter},
+	},
+	{
+		Pattern: "ungmute",
+		Handler: ungmuteHandler,
+		Filters: []telegram.Filter{sudoOnlyFilter},
+	},
+
+	{
 		Pattern: "(broadcast|gcast|bcast)",
 		Handler: broadcastHandler,
 		Filters: []telegram.Filter{ownerFilter, ignoreChannelFilter},
@@ -289,16 +366,6 @@ var handlers = []MsgHandlerDef{
 	{
 		Pattern: "replay",
 		Handler: replayHandler,
-		Filters: []telegram.Filter{superGroupFilter, authFilter},
-	},
-	{
-		Pattern: "mute",
-		Handler: muteHandler,
-		Filters: []telegram.Filter{superGroupFilter, authFilter},
-	},
-	{
-		Pattern: "unmute",
-		Handler: unmuteHandler,
 		Filters: []telegram.Filter{superGroupFilter, authFilter},
 	},
 	{
