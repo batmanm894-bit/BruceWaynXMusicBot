@@ -42,16 +42,16 @@ func banHandler(m *tg.NewMessage) error {
 	chatID := m.ChannelID()
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi valid user ko specify karo (reply karke ya ID/username dekar).")
+		m.Reply("Please specify a valid user (reply to their message or give an ID/username).")
 		return tg.ErrEndGroup
 	}
 
 	if _, err := m.Client.EditBannedBuilder(chatID, userID).Ban(0); err != nil {
-		m.Reply("Ban karne me error: " + err.Error())
+		m.Reply("Failed to ban: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("🚫 User is chat se ban kar diya gaya.")
+	m.Reply("🚫 User has been banned from this chat.")
 	return tg.ErrEndGroup
 }
 
@@ -59,16 +59,16 @@ func unbanHandler(m *tg.NewMessage) error {
 	chatID := m.ChannelID()
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi valid user ko specify karo (reply karke ya ID/username dekar).")
+		m.Reply("Please specify a valid user (reply to their message or give an ID/username).")
 		return tg.ErrEndGroup
 	}
 
 	if _, err := m.Client.EditBannedBuilder(chatID, userID).Unban(); err != nil {
-		m.Reply("Unban karne me error: " + err.Error())
+		m.Reply("Failed to unban: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("✅ User ka ban hata diya gaya.")
+	m.Reply("✅ User has been unbanned.")
 	return tg.ErrEndGroup
 }
 
@@ -76,16 +76,16 @@ func kickHandler(m *tg.NewMessage) error {
 	chatID := m.ChannelID()
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi valid user ko specify karo (reply karke ya ID/username dekar).")
+		m.Reply("Please specify a valid user (reply to their message or give an ID/username).")
 		return tg.ErrEndGroup
 	}
 
 	if _, err := m.Client.KickParticipant(chatID, userID); err != nil {
-		m.Reply("Kick karne me error: " + err.Error())
+		m.Reply("Failed to kick: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("👢 User ko chat se nikal diya gaya (invite link se wapas aa sakta hai).")
+	m.Reply("👢 User has been kicked from this chat (they can rejoin via invite link).")
 	return tg.ErrEndGroup
 }
 
@@ -93,16 +93,16 @@ func promoteHandler(m *tg.NewMessage) error {
 	chatID := m.ChannelID()
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi valid user ko specify karo (reply karke ya ID/username dekar).")
+		m.Reply("Please specify a valid user (reply to their message or give an ID/username).")
 		return tg.ErrEndGroup
 	}
 
 	if _, err := m.Client.EditAdminBuilder(chatID, userID).Promote(); err != nil {
-		m.Reply("Promote karne me error: " + err.Error())
+		m.Reply("Failed to promote: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("⬆️ User ko admin bana diya gaya.")
+	m.Reply("⬆️ User has been promoted to admin.")
 	return tg.ErrEndGroup
 }
 
@@ -110,15 +110,15 @@ func demoteHandler(m *tg.NewMessage) error {
 	chatID := m.ChannelID()
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
-		m.Reply("Kisi valid user ko specify karo (reply karke ya ID/username dekar).")
+		m.Reply("Please specify a valid user (reply to their message or give an ID/username).")
 		return tg.ErrEndGroup
 	}
 
 	if _, err := m.Client.EditAdminBuilder(chatID, userID).Demote(); err != nil {
-		m.Reply("Demote karne me error: " + err.Error())
+		m.Reply("Failed to demote: " + err.Error())
 		return tg.ErrEndGroup
 	}
 
-	m.Reply("⬇️ User ko demote kar diya gaya.")
+	m.Reply("⬇️ User has been demoted.")
 	return tg.ErrEndGroup
 }
