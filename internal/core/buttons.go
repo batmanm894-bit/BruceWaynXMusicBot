@@ -220,6 +220,12 @@ func GetHelpKeyboard(chatID int64) *tg.ReplyInlineMarkup {
 		).
 		AddRow(
 			tg.Button.Data(
+				F(chatID, "HELP_MANAGEMENT_BTN"),
+				"help:management",
+			),
+		).
+		AddRow(
+			tg.Button.Data(
 				F(chatID, "HELP_OWNER_BTN"),
 				"help:owner",
 			),
