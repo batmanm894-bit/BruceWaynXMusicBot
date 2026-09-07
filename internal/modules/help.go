@@ -97,6 +97,8 @@ func helpCallbackHandler(c *tg.CallbackQuery) error {
 	switch parts[1] {
 	case "admins":
 		text = F(chatID, "help_admin")
+	case "management":
+		text = F(chatID, "help_management")
 	case "sudoers":
 		text = F(chatID, "help_sudo")
 	case "owner":
