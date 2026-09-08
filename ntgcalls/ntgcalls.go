@@ -14,6 +14,7 @@ package ntgcalls
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"sync"
@@ -21,6 +22,11 @@ import (
 
 	"github.com/Laky-64/gologging"
 )
+
+// ErrClientClosed is returned by Client methods once Free() has destroyed
+// the underlying native call object. Callers should stop using the Client
+// after seeing this error.
+var ErrClientClosed = errors.New("ntgcalls: client is closed")
 
 var clientRegistry = struct {
 	sync.RWMutex
@@ -92,9 +98,9 @@ func NTgCalls() *Client {
 	)
 
 	runtime.SetFinalizer(instance, func(c *Client) {
-		if c.ptr != 0 {
-			c.Free()
-		}
+		// Free() itself checks whether the pointer is still valid under
+		// lock, so it is always safe to call from the finalizer.
+		c.Free()
 	})
 	return instance
 }
@@ -378,10 +384,16 @@ func handleRequestBroadcastPart(
 }
 
 func (ctx *Client) GetState(chatId int64) (MediaState, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return MediaState{}, err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	var buffer C.ntg_media_state_struct
 	C.ntg_get_state(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		&buffer,
 		f.ParseToC(),
@@ -400,10 +412,16 @@ func (ctx *Client) GetState(chatId int64) (MediaState, error) {
 }
 
 func (ctx *Client) GetConnectionMode(chatId int64) (ConnectionMode, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return ConnectionMode(0), err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	var buffer C.ntg_connection_mode_enum
 	C.ntg_get_connection_mode(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		&buffer,
 		f.ParseToC(),
@@ -426,19 +444,31 @@ func (ctx *Client) GetConnectionMode(chatId int64) (ConnectionMode, error) {
 }
 
 func (ctx *Client) CreateCall(chatId int64) (string, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
 	var buffer *C.char
 	f := CreateFuture()
-	C.ntg_create(C.uintptr_t(ctx.ptr), C.int64_t(chatId), &buffer, f.ParseToC())
+	C.ntg_create(ptr, C.int64_t(chatId), &buffer, f.ParseToC())
 	f.wait()
 	defer C.free(unsafe.Pointer(buffer))
 	return C.GoString(buffer), parseErrorCode(f)
 }
 
 func (ctx *Client) InitPresentation(chatId int64) (string, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
+
 	var buffer *C.char
 	f := CreateFuture()
 	C.ntg_init_presentation(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		&buffer,
 		f.ParseToC(),
@@ -449,9 +479,15 @@ func (ctx *Client) InitPresentation(chatId int64) (string, error) {
 }
 
 func (ctx *Client) StopPresentation(chatId int64) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	C.ntg_stop_presentation(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		f.ParseToC(),
 	)
@@ -464,12 +500,18 @@ func (ctx *Client) AddIncomingVideo(
 	endpoint string,
 	ssrcGroups []SsrcGroup,
 ) (uint32, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+
 	buffer := new(C.uint32_t)
 	f := CreateFuture()
 	endpointC := C.CString(endpoint)
 	ssrcGroupsC := parseSsrcGroups(ssrcGroups)
 	C.ntg_add_incoming_video(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		endpointC,
 		ssrcGroupsC,
@@ -484,10 +526,16 @@ func (ctx *Client) AddIncomingVideo(
 }
 
 func (ctx *Client) RemoveIncomingVideo(chatId int64, endpoint string) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	endpointC := C.CString(endpoint)
 	C.ntg_remove_incoming_video(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		endpointC,
 		f.ParseToC(),
@@ -498,8 +546,14 @@ func (ctx *Client) RemoveIncomingVideo(chatId int64, endpoint string) error {
 }
 
 func (ctx *Client) CreateP2PCall(chatId int64) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
-	C.ntg_create_p2p(C.uintptr_t(ctx.ptr), C.int64_t(chatId), f.ParseToC())
+	C.ntg_create_p2p(ptr, C.int64_t(chatId), f.ParseToC())
 	f.wait()
 	return parseErrorCode(f)
 }
@@ -509,13 +563,19 @@ func (ctx *Client) InitExchange(
 	dhConfig DhConfig,
 	gAHash []byte,
 ) ([]byte, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	var buffer *C.uint8_t
 	var size C.int
 	gAHashC, gAHashSize := parseBytes(gAHash)
 	dhConfigC := dhConfig.ParseToC()
 	f := CreateFuture()
 	C.ntg_init_exchange(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		&dhConfigC,
 		gAHashC,
@@ -536,11 +596,17 @@ func (ctx *Client) ExchangeKeys(
 	gAB []byte,
 	fingerprint int64,
 ) (AuthParams, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return AuthParams{}, err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	var buffer C.ntg_auth_params_struct
 	gABC, gABSize := parseBytes(gAB)
 	C.ntg_exchange_keys(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		gABC,
 		gABSize,
@@ -565,10 +631,16 @@ func (ctx *Client) SkipExchange(
 	encryptionKey []byte,
 	isOutgoing bool,
 ) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	encryptionKeyC, encryptionKeySize := parseBytes(encryptionKey)
 	C.ntg_skip_exchange(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		encryptionKeyC,
 		encryptionKeySize,
@@ -586,11 +658,17 @@ func (ctx *Client) ConnectP2P(
 	versions []string,
 	P2PAllowed bool,
 ) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	versionsC, sizeVersions := parseStringVectorC(versions)
 	rtcServersC := parseRtcServers(rtcServers)
 	C.ntg_connect_p2p(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		rtcServersC,
 		C.int(len(rtcServers)),
@@ -606,10 +684,16 @@ func (ctx *Client) ConnectP2P(
 }
 
 func (ctx *Client) SendSignalingData(chatId int64, data []byte) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	dataC, dataSize := parseBytes(data)
 	C.ntg_send_signaling_data(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		dataC,
 		dataSize,
@@ -641,10 +725,16 @@ func (ctx *Client) Connect(
 	params string,
 	isPresentation bool,
 ) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	paramsC := C.CString(params)
 	C.ntg_connect(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		paramsC,
 		C.bool(isPresentation),
@@ -660,12 +750,18 @@ func (ctx *Client) SetStreamSources(
 	streamMode StreamMode,
 	desc MediaDescription,
 ) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	cDesc := desc.ParseToC()
 	defer freeMediaDescriptionC(cDesc)
 
 	C.ntg_set_stream_sources(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		streamMode.ParseToC(),
 		cDesc,
@@ -681,10 +777,16 @@ func (ctx *Client) SendExternalFrame(
 	data []byte,
 	frameData FrameData,
 ) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	dataC, dataSize := parseBytes(data)
 	C.ntg_send_external_frame(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		streamDevice.ParseToC(),
 		dataC,
@@ -698,9 +800,15 @@ func (ctx *Client) SendExternalFrame(
 }
 
 func (ctx *Client) SendBroadcastTimestamp(chatId, timestamp int64) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	C.ntg_send_broadcast_timestamp(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		C.int64_t(timestamp),
 		f.ParseToC(),
@@ -716,10 +824,16 @@ func (ctx *Client) SendBroadcastPart(
 	qualityUpdate bool,
 	data []byte,
 ) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	dataC, dataSize := parseBytes(data)
 	C.ntg_send_broadcast_part(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		C.int64_t(segmentID),
 		C.int32_t(partID),
@@ -735,45 +849,84 @@ func (ctx *Client) SendBroadcastPart(
 }
 
 func (ctx *Client) Pause(chatId int64) (bool, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+
 	f := CreateFuture()
-	C.ntg_pause(C.uintptr_t(ctx.ptr), C.int64_t(chatId), f.ParseToC())
+	C.ntg_pause(ptr, C.int64_t(chatId), f.ParseToC())
 	f.wait()
 	return parseBool(f)
 }
 
 func (ctx *Client) Resume(chatId int64) (bool, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+
 	f := CreateFuture()
-	C.ntg_resume(C.uintptr_t(ctx.ptr), C.int64_t(chatId), f.ParseToC())
+	C.ntg_resume(ptr, C.int64_t(chatId), f.ParseToC())
 	f.wait()
 	return parseBool(f)
 }
 
 func (ctx *Client) Mute(chatId int64) (bool, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+
 	f := CreateFuture()
-	C.ntg_mute(C.uintptr_t(ctx.ptr), C.int64_t(chatId), f.ParseToC())
+	C.ntg_mute(ptr, C.int64_t(chatId), f.ParseToC())
 	f.wait()
 	return parseBool(f)
 }
 
 func (ctx *Client) Unmute(chatId int64) (bool, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+
 	f := CreateFuture()
-	C.ntg_unmute(C.uintptr_t(ctx.ptr), C.int64_t(chatId), f.ParseToC())
+	C.ntg_unmute(ptr, C.int64_t(chatId), f.ParseToC())
 	f.wait()
 	return parseBool(f)
 }
 
 func (ctx *Client) Stop(chatId int64) error {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		// Already destroyed: treat as already stopped, not an error, so
+		// callers cleaning up a room don't fail on a stop that arrives
+		// after Free() has already run.
+		return nil
+	}
+	defer unlock()
+
 	f := CreateFuture()
-	C.ntg_stop(C.uintptr_t(ctx.ptr), C.int64_t(chatId), f.ParseToC())
+	C.ntg_stop(ptr, C.int64_t(chatId), f.ParseToC())
 	f.wait()
 	return parseErrorCode(f)
 }
 
 func (ctx *Client) Time(chatId int64, streamMode StreamMode) (uint64, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	var buffer C.int64_t
 	C.ntg_time(
-		C.uintptr_t(ctx.ptr),
+		ptr,
 		C.int64_t(chatId),
 		streamMode.ParseToC(),
 		&buffer,
@@ -808,9 +961,15 @@ func GetMediaDevices() MediaDevices {
 }
 
 func (ctx *Client) CpuUsage() (float64, error) {
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return 0, err
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	var buffer C.double
-	C.ntg_cpu_usage(C.uintptr_t(ctx.ptr), &buffer, f.ParseToC())
+	C.ntg_cpu_usage(ptr, &buffer, f.ParseToC())
 	f.wait()
 	return float64(buffer), parseErrorCode(f)
 }
@@ -821,10 +980,17 @@ func (ctx *Client) EnableGLibLoop(enable bool) {
 
 func (ctx *Client) Calls() map[int64]*CallInfo {
 	mapReturn := make(map[int64]*CallInfo)
+
+	ptr, unlock, err := ctx.ptrLocked()
+	if err != nil {
+		return mapReturn
+	}
+	defer unlock()
+
 	f := CreateFuture()
 	var buffer *C.ntg_call_info_struct
 	var size C.int
-	C.ntg_calls(C.uintptr_t(ctx.ptr), &buffer, &size, f.ParseToC())
+	C.ntg_calls(ptr, &buffer, &size, f.ParseToC())
 	f.wait()
 	for i := 0; i < int(size); i++ {
 		rawCall := *(*C.ntg_call_info_struct)(unsafe.Pointer(uintptr(unsafe.Pointer(buffer)) + uintptr(i)*unsafe.Sizeof(C.ntg_call_info_struct{})))
@@ -846,17 +1012,40 @@ func Version() string {
 }
 
 func (ctx *Client) Free() {
+	// Take the write lock: this blocks until every in-flight method that
+	// is currently holding the read lock (see ptrLocked below) has
+	// finished, and prevents any new call from starting once we begin
+	// destroying the native object. This is what stops the double-free /
+	// use-after-free race that caused the SIGSEGV crash.
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+
 	if ctx.ptr == 0 {
 		return
 	}
 
-	C.ntg_destroy(C.uintptr_t(ctx.ptr))
+	ptr := ctx.ptr
+	C.ntg_destroy(C.uintptr_t(ptr))
 
 	clientRegistry.Lock()
-	delete(clientRegistry.clients, ctx.ptr)
+	delete(clientRegistry.clients, ptr)
 	clientRegistry.Unlock()
 
 	ctx.ptr = 0
+}
+
+// ptrLocked must be called (and its returned unlock func deferred) before
+// any C.ntg_* call that uses ctx.ptr. It takes a read lock so many calls
+// can run concurrently, but Free()'s write lock will wait for all of them
+// to finish first, and will block any new call from starting once it has
+// begun destroying the native object.
+func (ctx *Client) ptrLocked() (C.uintptr_t, func(), error) {
+	ctx.mu.RLock()
+	if ctx.ptr == 0 {
+		ctx.mu.RUnlock()
+		return 0, func() {}, ErrClientClosed
+	}
+	return C.uintptr_t(ctx.ptr), ctx.mu.RUnlock, nil
 }
 
 func getClientFromUserData(userData unsafe.Pointer) *Client {
