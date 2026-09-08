@@ -827,6 +827,18 @@ func handlePlayAttemptError(
 		return true, nil
 	}
 
+	if tg.MatchError(err, "GROUPCALL_ADD_PARTICIPANTS_FAILED") {
+		// Transient Telegram-side error when joining the voice chat.
+		// Retrying after a short delay usually succeeds.
+		gologging.Error(
+			"GROUPCALL_ADD_PARTICIPANTS_FAILED occurred. Retrying... (attempt " + utils.IntToStr(
+				attempt,
+			) + ")",
+		)
+		time.Sleep(3 * time.Second)
+		return true, nil
+	}
+
 	return false, nil
 }
 
