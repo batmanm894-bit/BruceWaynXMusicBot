@@ -399,7 +399,7 @@ func (ctx *Client) GetState(chatId int64) (MediaState, error) {
 		f.ParseToC(),
 	)
 	f.wait()
-	err := parseErrorCode(f)
+	err = parseErrorCode(f)
 	if err != nil {
 		return MediaState{}, err
 	}
@@ -427,7 +427,7 @@ func (ctx *Client) GetConnectionMode(chatId int64) (ConnectionMode, error) {
 		f.ParseToC(),
 	)
 	f.wait()
-	err := parseErrorCode(f)
+	err = parseErrorCode(f)
 	if err != nil {
 		return ConnectionMode(0), err
 	}
