@@ -154,6 +154,16 @@ var handlers = []MsgHandlerDef{
 		Filters: []telegram.Filter{superGroupFilter, adminFilter},
 	},
 	{
+		Pattern: "mute",
+		Handler: muteHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
+		Pattern: "unmute",
+		Handler: unmuteHandler,
+		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+	},
+	{
 		Pattern: "promote",
 		Handler: promoteHandler,
 		Filters: []telegram.Filter{superGroupFilter, adminFilter},
