@@ -108,11 +108,38 @@ func (ctx *Context) Play(
 	mediaDescription ntgcalls.MediaDescription,
 ) error {
 	if ctx.binding.Calls()[chatID] != nil {
-		return ctx.binding.SetStreamSources(
+		if err := ctx.binding.SetStreamSources(
 			chatID,
 			ntgcalls.CaptureStream,
 			mediaDescription,
-		)
+		); err != nil {
+			return err
+		}
+
+		// SetStreamSources only updates what we encode/send locally.
+		// Telegram's group-call server also needs to be told our video
+		// status changed (e.g. an audio-only /play followed by /vplay in
+		// the same session) - otherwise it still marks us as
+		// video-stopped and other participants' clients never render our
+		// camera even though frames are flowing. This normally happens
+		// via the native OnUpgrade callback, but that fires
+		// asynchronously (and its error is only fmt.Println'd, easy to
+		// miss), so do it deterministically here as well for group calls.
+		if chatID < 0 {
+			ctx.inputGroupCallsMutex.RLock()
+			inputGroupCall := ctx.inputGroupCalls[chatID]
+			ctx.inputGroupCallsMutex.RUnlock()
+
+			if inputGroupCall != nil {
+				if state, err := ctx.binding.GetState(chatID); err == nil {
+					if err := ctx.setCallStatus(inputGroupCall, state); err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		return nil
 	}
 
 	err := ctx.connectCall(chatID, mediaDescription, "")
