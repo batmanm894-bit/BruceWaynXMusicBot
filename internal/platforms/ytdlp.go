@@ -442,7 +442,17 @@ func (y *YtdlpPlatform) downloadToDisk(
 		args = append(
 			args,
 			"-f",
-			"(b[height>=360][height<=1080]/bv*[height>=360][height<=1080]/bv*)+(ba[abr>=180][abr<=360]/ba)/b",
+			// Prefer a separate video+audio stream merge first: YouTube's
+			// pre-muxed/progressive formats ("b[...]") are capped around
+			// 720p, while separate video-only streams ("bv*") go up to
+			// 1080p+. Trying b[...] first (as before) meant a 720p
+			// progressive format would always win even when a sharper
+			// 1080p bv*+ba combo was available. ffmpeg merges bv*+ba into
+			// one file automatically.
+			"bv*[height>=360][height<=1080]+ba[abr>=180][abr<=360]"+
+				"/bv*[height<=1080]+ba"+
+				"/b[height>=360][height<=1080]"+
+				"/b",
 		)
 	} else {
 		args = append(args,

@@ -244,14 +244,37 @@ func Download(
 	)
 
 	var candidates []state.Platform
+	var audioOnlyFallbacks []state.Platform
 	for _, p := range GetOrderedPlatforms() {
-		if p.CanDownload(track.Source) {
-			candidates = append(candidates, p)
+		if !p.CanDownload(track.Source) {
+			gologging.Debug(
+				"Platform [" + string(p.Name()) + "] cannot download source: " + string(track.Source),
+			)
 			continue
 		}
-		gologging.Debug(
-			"Platform [" + string(p.Name()) + "] cannot download source: " + string(track.Source),
-		)
+
+		// Some platforms (FallenApi, SoundCloud) never return real video -
+		// they silently force track.Video = false and hand back audio
+		// instead. If they're tried first (by priority) for a /vplay
+		// request, they "succeed" immediately with audio-only, and a
+		// platform that could have given real video (YtDlp, ShrutiAPI)
+		// never gets a chance. So for video requests, push audio-only
+		// platforms to the back: only used if nothing else can serve it.
+		if track.Video && !platformSupportsVideo(p) {
+			gologging.Debug(
+				"Platform [" + string(p.Name()) + "] doesn't support video, deferring for video request",
+			)
+			audioOnlyFallbacks = append(audioOnlyFallbacks, p)
+			continue
+		}
+
+		candidates = append(candidates, p)
+	}
+
+	if len(candidates) == 0 {
+		candidates = audioOnlyFallbacks
+	} else {
+		candidates = append(candidates, audioOnlyFallbacks...)
 	}
 
 	if len(candidates) == 0 {
@@ -266,6 +289,19 @@ func Download(
 	}
 
 	return raceDownload(ctx, candidates, track, statusMsg)
+}
+
+// platformSupportsVideo reports whether p can actually deliver real video.
+// FallenApi and SoundCloud both silently force track.Video = false and
+// return audio instead, so they must never be picked ahead of a real
+// video-capable platform (YtDlp, ShrutiAPI, Telegram) for a /vplay request.
+func platformSupportsVideo(p state.Platform) bool {
+	switch p.Name() {
+	case PlatformFallenApi, PlatformSoundCloud:
+		return false
+	default:
+		return true
+	}
 }
 
 // sequentialDownload tries candidates one at a time, in priority order,
@@ -470,6 +506,19 @@ func findMediaInReply(m *telegram.NewMessage) (*telegram.NewMessage, bool, error
 	curr, err := m.GetReplyMessage()
 	if err != nil {
 		gologging.Error("Failed to fetch initial reply: " + err.Error())
+
+		// gogram's IsReply() returns true for messages that carry a reply
+		// header without an actual replied-to message id - e.g. topic/forum
+		// messages, or the top message of a linked-channel discussion
+		// thread. GetReplyMessage() then calls channels.getMessages with an
+		// empty id vector and Telegram returns MESSAGE_IDS_EMPTY. That's not
+		// a real failure, it just means "this isn't really a reply" - so
+		// treat it the same as "no media in reply" instead of surfacing the
+		// raw API error to the user.
+		if strings.Contains(err.Error(), "MESSAGE_IDS_EMPTY") {
+			return nil, false, errors.New("⚠️ Reply with a valid media (audio/video)")
+		}
+
 		return nil, false, fmt.Errorf("failed to get replied message: %w", err)
 	}
 
