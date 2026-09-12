@@ -66,16 +66,13 @@ func creloadHandler(m *telegram.NewMessage) error {
 }
 
 func handleReload(m *telegram.NewMessage, cplay bool) error {
-	r, err := getEffectiveRoom(m, cplay)
-	if err != nil {
-		m.Reply(err.Error())
-		return telegram.ErrEndGroup
-	}
-
 	chatID := m.ChannelID()
-	roomID := r.ID
 
-	if handled, err := checkReloadFlood(m, chatID, roomID); handled {
+	// Admin cache ko sabse pehle, aur room/assistant se bilkul independent
+	// refresh karo — ban/kick/promote/demote jaise commands ka voice-chat
+	// assistant se koi lena-dena nahi, isliye unka permission-fix bhi
+	// assistant availability par depend nahi karna chahiye.
+	if handled, err := checkReloadFlood(m, chatID, chatID); handled {
 		return err
 	}
 
@@ -86,12 +83,26 @@ func handleReload(m *telegram.NewMessage, cplay bool) error {
 
 	summary := ""
 
-	admins, adminSummary := reloadAdminCache(m.Client, chatID, roomID)
+	admins, adminSummary := reloadAdminCache(m.Client, chatID, chatID)
 	summary += adminSummary
 
 	isAdmin := slices.Contains(admins, m.SenderID())
 	floodDuration := utils.IfElse(isAdmin, 2*time.Minute, 5*time.Minute)
-	utils.SetFlood(fmt.Sprintf("reload:%d%d", roomID, m.SenderID()), floodDuration)
+	utils.SetFlood(fmt.Sprintf("reload:%d%d", chatID, m.SenderID()), floodDuration)
+
+	// Ab voice-chat/assistant state refresh karo — agar ye fail bhi ho
+	// jaaye, tab bhi admin cache upar refresh ho chuki hogi.
+	r, err := getEffectiveRoom(m, cplay)
+	if err != nil {
+		summary += F(chatID, "reload_assistant_fail", locales.Arg{
+			"error": err.Error(),
+		}) + "\n"
+		utils.EOR(statusMsg, F(chatID, "reload_done", locales.Arg{
+			"summary": summary,
+		}))
+		return nil
+	}
+	roomID := r.ID
 
 	cs, err := core.GetChatState(roomID)
 	if err != nil {
