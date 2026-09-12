@@ -81,6 +81,21 @@ func streamEndHandler(
 	var t *state.Track
 	var wasLooping bool
 	if len(r.Queue()) == 0 && r.Loop() == 0 {
+		if !hasVoiceChatListeners(ass, cid) {
+			// Nobody's left in the voice chat but the assistant itself -
+			// autoplay would otherwise keep chaining forever, burning
+			// search/download API quota (YouTube, FallenApi, ShrutiAPI,
+			// YtDlp) into an empty room. Stop here instead of calling
+			// autoplayNextTrack.
+			gologging.DebugF(
+				"[onStreamEndHandler] No listeners left in %d, skipping autoplay",
+				cid,
+			)
+			core.DeleteRoom(chatID)
+			core.Bot.SendMessage(cid, F(cid, "stream_queue_finished"))
+			return
+		}
+
 		if next := autoplayNextTrack(cid, r); next != nil {
 			r.AddTracksToQueue([]*state.Track{next})
 			wasLooping = false
@@ -184,4 +199,29 @@ func prefetchNextInQueue(r *core.RoomState) {
 	if q := r.Queue(); len(q) > 0 {
 		platforms.Prefetch(q[0])
 	}
+}
+
+// hasVoiceChatListeners reports whether anyone besides the assistant
+// itself is currently present in chatID's voice chat. Used to stop
+// autoplay from chaining forever (and burning search/download API quota)
+// once everyone has left and only the assistant remains connected.
+//
+// On any error fetching participants (e.g. a transient API hiccup), this
+// defaults to true (assume listeners present) rather than silently
+// killing playback - autoplay should only stop when we're actually sure
+// the room is empty.
+func hasVoiceChatListeners(ass *core.Assistant, chatID int64) bool {
+	participants, err := ass.Ntg.GetParticipants(chatID)
+	if err != nil {
+		gologging.DebugF(
+			"[autoplay] Failed to fetch participants for %d, assuming listeners present: %v",
+			chatID, err,
+		)
+		return true
+	}
+
+	// The assistant itself is always one of the participants once it has
+	// joined the call, so "just the assistant" means length 1 (or 0, if
+	// the participant list hasn't caught up yet - also treated as empty).
+	return len(participants) > 1
 }
