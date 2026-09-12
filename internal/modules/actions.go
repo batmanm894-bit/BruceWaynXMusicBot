@@ -104,14 +104,24 @@ func handleVoiceChatAction(m *telegram.NewMessage, action *telegram.MessageActio
 	chatID := m.ChannelID()
 	isActive := action.Duration == 0
 
-	go clearRTMPState(chatID)
 	s, err := core.GetChatState(chatID)
 	if err != nil {
 		gologging.ErrorF("Failed to get chat state for %d: %v", chatID, err)
 		return telegram.ErrEndGroup
 	}
 
-	s.SetVoiceChatActive(isActive)
+	// Telegram sometimes redelivers the same group-call service message
+	// (or delivers ended/started back-to-back within the same second).
+	// Skip duplicates so we don't repeatedly tear down/notify for a state
+	// that hasn't actually changed — this was causing rapid
+	// "ended -> started -> ended" flapping and spurious native call errors
+	// for the same chat.
+	if !s.SetVoiceChatActive(isActive) {
+		gologging.DebugF("Ignoring duplicate voice chat %s event in %d", utils.IfElse(isActive, "started", "ended"), chatID)
+		return telegram.ErrEndGroup
+	}
+
+	go clearRTMPState(chatID)
 
 	msgKey := utils.IfElse(isActive, "voicechat_started", "voicechat_ended")
 	m.Respond(F(chatID, msgKey, locales.Arg{"duration": utils.FormatDuration(int(action.Duration))}))
