@@ -132,11 +132,19 @@ func (s *ChatState) SetAssistantBanned(v bool) {
 	s.mu.Unlock()
 }
 
-func (s *ChatState) SetVoiceChatActive(v bool) {
+// SetVoiceChatActive updates the cached voice-chat-active flag and reports
+// whether it actually changed. Telegram can deliver duplicate group-call
+// service messages for the same state in quick succession; callers should
+// use the returned bool to skip redundant cleanup/notification work for
+// duplicates, since acting on every repeat is what produces rapid
+// "ended -> started -> ended" flapping against the native call layer.
+func (s *ChatState) SetVoiceChatActive(v bool) (changed bool) {
 	s.mu.Lock()
+	changed = !s.fetched || s.snapshot.VoiceChatActive != v
 	s.snapshot.VoiceChatActive = v
 	s.fetched = true
 	s.mu.Unlock()
+	return changed
 }
 
 func (s *ChatState) AssistantFetched() bool {

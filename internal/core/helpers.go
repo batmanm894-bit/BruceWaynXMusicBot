@@ -34,11 +34,16 @@ func normalizeVideo(path string, speed float64) (int, int, int, string) {
 	}
 	w, h := getVideoDimensions(path)
 	if w <= 0 || h <= 0 {
-		w = 1280
-		h = 720
+		w = 1920
+		h = 1080
 	}
-	maxW := 1280
-	maxH := 720
+	// Sources are already downloaded at up to 1080p (see ytdlp.go's format
+	// selector), so capping the voice-chat stream at 720p here was throwing
+	// away quality the download already had. 1080p is the resolution
+	// Telegram group-call video actually supports, so match it instead of
+	// needlessly downscaling.
+	maxW := 1920
+	maxH := 1080
 	if w > maxW {
 		h = h * maxW / w
 		w = maxW
