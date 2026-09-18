@@ -19,6 +19,8 @@ package modules
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	tg "github.com/amarnathcjd/gogram/telegram"
 
@@ -38,6 +40,90 @@ func init() {
 <u>Usage:</u>
 <b>/gmute</b> (reply) — Gmute the replied user
 <b>/gmute [user_id]</b> — Gmute by ID/username`
+
+	helpTexts["/gbanlist"] = `<i>Shows the total count and user IDs of everyone currently globally banned.</i>
+
+<u>Usage:</u>
+<b>/gbanlist</b>`
+
+	helpTexts["/gmutelist"] = `<i>Shows the total count and user IDs of everyone currently globally muted.</i>
+
+<u>Usage:</u>
+<b>/gmutelist</b>`
+}
+
+// glistCard renders a branded count + user list (name, username, ID) for
+// /gbanlist and /gmutelist. Telegram messages cap out around 4096 chars, so
+// long lists are chunked and only the first chunk carries the header/count;
+// the rest are sent as plain follow-up messages.
+func glistCard(m *tg.NewMessage, title string, ids []int64) error {
+	if len(ids) == 0 {
+		_, err := m.Reply(fmt.Sprintf(
+			"%s\n\n▸ <b>%s</b>\n\n<pre>Total   0</pre>",
+			modHeader, title,
+		))
+		return err
+	}
+
+	lines := make([]string, len(ids))
+	for i, id := range ids {
+		idStr := strconv.FormatInt(id, 10)
+		entry := utils.MentionHTML(nil) + " — <code>" + idStr + "</code>"
+
+		if user, err := m.Client.GetUser(id); err == nil && user != nil {
+			name := utils.MentionHTML(user)
+			if user.Username != "" {
+				entry = fmt.Sprintf("%s (@%s) — <code>%s</code>", name, user.Username, idStr)
+			} else {
+				entry = fmt.Sprintf("%s — <code>%s</code>", name, idStr)
+			}
+		}
+
+		lines[i] = fmt.Sprintf("%d. %s", i+1, entry)
+	}
+
+	const chunkSize = 40
+	first := true
+	for start := 0; start < len(lines); start += chunkSize {
+		end := min(start+chunkSize, len(lines))
+		body := strings.Join(lines[start:end], "\n")
+
+		var text string
+		if first {
+			text = fmt.Sprintf(
+				"%s\n\n▸ <b>%s</b>\n\n<pre>Total   %d</pre>\n\n%s",
+				modHeader, title, len(ids), body,
+			)
+			first = false
+		} else {
+			text = body
+		}
+
+		if _, err := m.Reply(text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func gbanlistHandler(m *tg.NewMessage) error {
+	ids, err := database.GbannedUsers()
+	if err != nil {
+		m.Reply(modError("Gbanlist", "failed to fetch: "+err.Error()))
+		return tg.ErrEndGroup
+	}
+	glistCard(m, "🚫 Globally Banned Users", ids)
+	return tg.ErrEndGroup
+}
+
+func gmutelistHandler(m *tg.NewMessage) error {
+	ids, err := database.GmutedUsers()
+	if err != nil {
+		m.Reply(modError("Gmutelist", "failed to fetch: "+err.Error()))
+		return tg.ErrEndGroup
+	}
+	glistCard(m, "🔇 Globally Muted Users", ids)
+	return tg.ErrEndGroup
 }
 
 // gcardHeader mirrors the branded style used for local moderation actions,

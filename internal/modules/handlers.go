@@ -194,6 +194,16 @@ var handlers = []MsgHandlerDef{
 		Handler: ungmuteHandler,
 		Filters: []telegram.Filter{sudoOnlyFilter},
 	},
+	{
+		Pattern: "gbanlist",
+		Handler: gbanlistHandler,
+		Filters: []telegram.Filter{sudoOnlyFilter},
+	},
+	{
+		Pattern: "gmutelist",
+		Handler: gmutelistHandler,
+		Filters: []telegram.Filter{sudoOnlyFilter},
+	},
 
 	{
 		Pattern: "(broadcast|gcast|bcast)",
