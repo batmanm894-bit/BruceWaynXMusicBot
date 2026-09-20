@@ -297,7 +297,7 @@ func Download(
 // video-capable platform (YtDlp, ShrutiAPI, Telegram) for a /vplay request.
 func platformSupportsVideo(p state.Platform) bool {
 	switch p.Name() {
-	case PlatformFallenApi, PlatformSoundCloud:
+	case PlatformFallenApi, PlatformSoundCloud, PlatformSaavn:
 		return false
 	default:
 		return true

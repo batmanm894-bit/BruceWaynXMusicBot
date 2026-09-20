@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"sync/atomic"
+	"time"
 
 	"github.com/Laky-64/gologging"
 	"github.com/amarnathcjd/gogram/telegram"
@@ -34,6 +36,11 @@ import (
 )
 
 const PlatformShrutiAPI state.PlatformName = "ShrutiAPI"
+
+// shrutiCooldownUntil holds a unix timestamp until which ShrutiAPI is skipped
+// after it answered 429 (quota exhausted / rate limited). This stops the bot
+// from hammering the API with dozens of doomed requests per song.
+var shrutiCooldownUntil atomic.Int64
 
 // shrutiAPIErrorResponse covers the JSON shape ShrutiAPI sends back on
 // failure (e.g. invalid key, rate limit). On success it does NOT return
@@ -148,6 +155,10 @@ func (s *ShrutiAPIPlatform) fetchAndSave(
 ) error {
 	var lastErr error
 
+	if until := shrutiCooldownUntil.Load(); time.Now().Unix() < until {
+		return fmt.Errorf("shrutiapi cooling down after 429 (quota/rate limit)")
+	}
+
 	for _, key := range shuffledKeys(config.ShrutiAPIKeys) {
 		for _, base := range config.ShrutiAPIURLs {
 			apiReqURL := fmt.Sprintf(
@@ -182,6 +193,10 @@ func (s *ShrutiAPIPlatform) fetchAndSave(
 					base, resp.StatusCode(), msg,
 				), key)
 				gologging.Debug("ShrutiAPI: key/url failed, trying next -> " + lastErr.Error())
+				if resp.StatusCode() == 429 {
+					shrutiCooldownUntil.Store(time.Now().Add(10 * time.Minute).Unix())
+					return lastErr
+				}
 				continue
 			}
 

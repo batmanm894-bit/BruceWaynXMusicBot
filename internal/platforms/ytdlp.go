@@ -449,9 +449,12 @@ func (y *YtdlpPlatform) downloadToDisk(
 			// progressive format would always win even when a sharper
 			// 1080p bv*+ba combo was available. ffmpeg merges bv*+ba into
 			// one file automatically.
-			"bv*[height>=360][height<=1080]+ba[abr>=180][abr<=360]"+
-				"/bv*[height<=1080]+ba"+
-				"/b[height>=360][height<=1080]"+
+			// Capped at 720p: 1080p merges were getting OOM-killed
+			// ("signal: killed") on small hosts, which made /vplay fall
+			// back to audio-only.
+			"bv*[height>=360][height<=720]+ba[abr>=128]"+
+				"/bv*[height<=720]+ba"+
+				"/b[height<=720]"+
 				"/b",
 		)
 	} else {
