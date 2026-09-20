@@ -108,70 +108,71 @@ var handlers = []MsgHandlerDef{
 		Filters: []telegram.Filter{sudoOnlyFilter, ignoreChannelFilter},
 	},
 
+	// Group management: owner-only, silent (no response for anyone else).
 	{
 		Pattern: "warn",
 		Handler: warnHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "(warnings|warns)",
 		Handler: warningsHandler,
-		Filters: []telegram.Filter{superGroupFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "resetwarn",
 		Handler: resetwarnHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "pin",
 		Handler: pinHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "unpin",
 		Handler: unpinHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "purge",
 		Handler: purgeHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "ban",
 		Handler: banHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "unban",
 		Handler: unbanHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "kick",
 		Handler: kickHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "mute",
 		Handler: muteHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "unmute",
 		Handler: unmuteHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "promote",
 		Handler: promoteHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 	{
 		Pattern: "demote",
 		Handler: demoteHandler,
-		Filters: []telegram.Filter{superGroupFilter, adminFilter},
+		Filters: []telegram.Filter{superGroupFilter, ownerSilentFilter},
 	},
 
 	{

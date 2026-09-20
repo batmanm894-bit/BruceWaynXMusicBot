@@ -264,9 +264,25 @@ func prepareRoomAndSearchMessage(
 		)
 	}
 
-	replyMsg, err := m.Reply(statusText)
-	if err != nil {
-		gologging.ErrorF("Failed to send searching message: %v", err)
+	// Telegram occasionally answers with RANDOM_ID_DUPLICATE / transient
+	// errors; retry a few times so the command doesn't die silently.
+	var replyMsg *tg.NewMessage
+	for attempt := 1; attempt <= 3; attempt++ {
+		replyMsg, err = m.Reply(statusText)
+		if err == nil && replyMsg != nil {
+			break
+		}
+		gologging.ErrorF("Failed to send searching message (attempt %d): %v", attempt, err)
+		if wait := tg.GetFloodWait(err); wait > 0 && wait <= 5 {
+			time.Sleep(time.Duration(wait) * time.Second)
+		} else {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+	if err != nil || replyMsg == nil {
+		if err == nil {
+			err = fmt.Errorf("failed to send searching message")
+		}
 		return nil, nil, err
 	}
 

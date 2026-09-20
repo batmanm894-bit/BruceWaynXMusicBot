@@ -20,6 +20,7 @@ package modules
 import (
 	"strings"
 
+	"github.com/Laky-64/gologging"
 	tg "github.com/amarnathcjd/gogram/telegram"
 
 	"main/internal/config"
@@ -34,6 +35,7 @@ var (
 	ignoreChannelFilter = tg.CustomFilter(filterChannel)
 	sudoOnlyFilter      = tg.CustomFilter(filterSudo)
 	ownerFilter         = tg.CustomFilter(filterOwner)
+	ownerSilentFilter   = tg.CustomFilter(filterOwnerSilent)
 )
 
 func filterSuperGroup(m *tg.NewMessage) bool {
@@ -105,10 +107,25 @@ func filterSudo(m *tg.NewMessage) bool {
 }
 
 func filterChannel(m *tg.NewMessage) bool {
-	if _, ok := m.Message.FromID.(*tg.PeerChannel); ok {
-		return false
+	p, ok := m.Message.FromID.(*tg.PeerChannel)
+	if !ok {
+		return true
 	}
-	return true
+
+	// Anonymous admins: Telegram sets from_id to the group itself. These must
+	// NOT be ignored, otherwise commands from anonymous admins silently do
+	// nothing (and never show up in the logs).
+	if -1000000000000-p.ChannelID == m.ChannelID() {
+		return true
+	}
+
+	// Messages sent "as another channel" are ignored.
+	gologging.DebugF(
+		"Ignoring message sent as channel %d in chat %d",
+		p.ChannelID,
+		m.ChannelID(),
+	)
+	return false
 }
 
 func canUseAdminCommand(c *tg.Client, chatID, userID int64) bool {
@@ -155,4 +172,11 @@ func isOwnerOrSudo(userID int64) bool {
 	}
 	isSudo, err := database.IsSudo(userID)
 	return err == nil && isSudo
+}
+
+// filterOwnerSilent allows only the bot owner, and never replies when
+// denying — used for group-management commands that should behave as if
+// they don't exist for anyone else.
+func filterOwnerSilent(m *tg.NewMessage) bool {
+	return config.OwnerID != 0 && m.SenderID() == config.OwnerID
 }

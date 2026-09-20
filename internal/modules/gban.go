@@ -155,10 +155,29 @@ func applyToAllChats(c *tg.Client, fn func(chatID int64) error) (ok, fail int) {
 	return ok, fail
 }
 
+// protectedTarget reports whether userID must never be gbanned/gmuted: the
+// bot owner, any sudo user, or the bot itself.
+func protectedTarget(c *tg.Client, userID int64) bool {
+	if isOwnerOrSudo(userID) {
+		return true
+	}
+	if c != nil {
+		if me := c.Me(); me != nil && me.ID == userID {
+			return true
+		}
+	}
+	return false
+}
+
 func gbanHandler(m *tg.NewMessage) error {
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
 		m.Reply(noValidUserMsg)
+		return tg.ErrEndGroup
+	}
+
+	if protectedTarget(m.Client, userID) {
+		m.Reply(modError("Gban", "the owner, sudo users and the bot itself can't be globally banned."))
 		return tg.ErrEndGroup
 	}
 
@@ -216,6 +235,11 @@ func gmuteHandler(m *tg.NewMessage) error {
 	userID, err := utils.ExtractUser(m)
 	if err != nil {
 		m.Reply(noValidUserMsg)
+		return tg.ErrEndGroup
+	}
+
+	if protectedTarget(m.Client, userID) {
+		m.Reply(modError("Gmute", "the owner, sudo users and the bot itself can't be globally muted."))
 		return tg.ErrEndGroup
 	}
 

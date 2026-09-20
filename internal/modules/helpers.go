@@ -135,19 +135,22 @@ func sendPlayLogs(m *tg.NewMessage, track *state.Track, queued bool) {
 
 	var sb strings.Builder
 	sb.WriteString("🎵 ")
-	if m.Channel.Username != "" {
+	if m.Channel != nil && m.Channel.Username != "" {
 		fmt.Fprintf(&sb, "<b><a href=\"%s\">%s</a></b>\n\n", m.Link(), header)
 	} else {
 		fmt.Fprintf(&sb, "<b><u>%s</u></b>\n\n", header)
 	}
 
-	groupName := m.Channel.Title
-	if m.Channel.Username != "" {
-		groupName = "@" + m.Channel.Username
+	groupName := "Unknown"
+	if m.Channel != nil {
+		groupName = m.Channel.Title
+		if m.Channel.Username != "" {
+			groupName = "@" + m.Channel.Username
+		}
 	}
 
 	requestedBy := utils.MentionHTML(m.Sender)
-	if m.Sender.Username != "" {
+	if m.Sender != nil && m.Sender.Username != "" {
 		requestedBy = "@" + m.Sender.Username
 	}
 
