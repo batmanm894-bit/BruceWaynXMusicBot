@@ -48,6 +48,7 @@ var (
 	FallenAPIKeys       []string
 	ShrutiAPIURLs       []string
 	ShrutiAPIKeys       []string
+	SaavnAPIURLs        []string
 	DefaultLang         string
 	DurationLimit       int
 	LeaveOnDemoted      bool
@@ -136,6 +137,7 @@ func loadConfig() {
 		},
 	)
 	ShrutiAPIKeys = getStringSlice("SHRUTI_API_KEY", nil)
+	SaavnAPIURLs = getStringSlice("SAAVN_API_URLS", nil)
 	DefaultLang = getString("DEFAULT_LANG", "en")
 	DurationLimit = int(getInt64("DURATION_LIMIT", 4200))
 	LeaveOnDemoted = getBool("LEAVE_ON_DEMOTED", false)
@@ -146,7 +148,7 @@ func loadConfig() {
 	ProxyURL = getString("PROXY_URL", "")
 	SetCmds = getBool("SET_CMDS", false)
 	MaxAuthUsers = int(getInt64("MAX_AUTH_USERS", 25))
-	MaxConcurrentYtdlp = int(getInt64("MAX_CONCURRENT_YTDLP", 4))
+	MaxConcurrentYtdlp = int(getInt64("MAX_CONCURRENT_YTDLP", 2))
 	StartImages = getStringSlice("START_IMAGES", nil)
 	EffectIDs = getInt64Slice("EFFECT_IDS", nil)
 	if len(StartImages) == 0 {
