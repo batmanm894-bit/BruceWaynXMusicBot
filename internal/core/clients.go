@@ -197,7 +197,7 @@ func handleFlood(err error) bool {
 		return false
 	}
 
-	if wait > 10 {
+	if wait > 60 {
 		gologging.WarnF("Flood wait too long, skipping sleep %d seconds", wait)
 		return false
 	}
