@@ -19,7 +19,6 @@ HELP_ADMINS_BTN: "ᴀᴅᴍɪɴs"
 HELP_PUBLIC_BTN: "ᴘᴜʙʟɪᴄ"
 HELP_OWNER_BTN: "ᴏᴡɴᴇʀ"
 HELP_SUDOERS_BTN: "sᴜᴅᴏᴇʀs"
-HELP_MANAGEMENT_BTN: "ᴍᴀɴᴀɢᴇᴍᴇɴᴛ"
 
 BACK_BTN: "ʙᴀᴄᴋ"
 
@@ -1031,24 +1030,6 @@ help_admin: |
   ├ /loop       Toggle loop
   ├ /stop       Stop & leave VC
   └ /nothumb    Toggle thumbnail</pre>
-
-help_management: |
-  🧰 —— <a href="{bot_link}"><b>Bruce Music</b></a> —— 🧰
-  <b>Management Panel</b>
-
-  <i>Group moderation tools available to chat admins (and the bot owner/sudoers).</i>
-
-  <pre>┌ /ban        Ban a user
-  ├ /unban      Unban a user
-  ├ /kick       Kick a user
-  ├ /promote    Promote to admin
-  ├ /demote     Demote an admin
-  ├ /warn       Warn a user
-  ├ /warnings   Check a user's warnings
-  ├ /resetwarn  Reset a user's warnings
-  ├ /pin        Pin replied message
-  ├ /unpin      Unpin replied message
-  └ /purge      Bulk-delete messages</pre>
 
 help_public: |
   🌍 —— <a href="{bot_link}"><b>Bruce Music</b></a> —— 🌍
