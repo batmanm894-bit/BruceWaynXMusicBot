@@ -19,9 +19,22 @@ package utils
 
 import (
 	"fmt"
+	"unicode/utf16"
 
 	"github.com/amarnathcjd/gogram/telegram"
 )
+
+// ExtractOwnURLs returns URLs found only in the message itself, ignoring
+// whatever message it replies to. Callers use this so that text typed next
+// to a command (e.g. "/play song name") isn't overridden by a link that
+// happens to sit in the message being replied to (like the bot's own
+// "now playing" message, which carries the current track's URL).
+func ExtractOwnURLs(m *telegram.NewMessage) []string {
+	if m == nil || m.Message == nil {
+		return nil
+	}
+	return collectURLs(m.Message)
+}
 
 func ExtractURLs(m *telegram.NewMessage) ([]string, error) {
 	if m == nil || m.Message == nil {
@@ -64,14 +77,19 @@ func collectURLs(msg *telegram.MessageObj) []string {
 		return nil
 	}
 
-	text := msg.Message
+	// Telegram entity offsets/lengths are counted in UTF-16 code units,
+	// not bytes. Slicing the Go string directly returns garbage (or
+	// silently drops the URL) as soon as the text contains Hindi, emoji or
+	// any other non-ASCII character before the link.
+	units := utf16.Encode([]rune(msg.Message))
 	urls := make([]string, 0, len(msg.Entities))
 
 	for _, ent := range msg.Entities {
 		switch e := ent.(type) {
 		case *telegram.MessageEntityURL:
-			if int(e.Offset+e.Length) <= len(text) {
-				urls = append(urls, text[e.Offset:e.Offset+e.Length])
+			start, end := int(e.Offset), int(e.Offset+e.Length)
+			if start >= 0 && start < end && end <= len(units) {
+				urls = append(urls, string(utf16.Decode(units[start:end])))
 			}
 		case *telegram.MessageEntityTextURL:
 			if e.URL != "" {
