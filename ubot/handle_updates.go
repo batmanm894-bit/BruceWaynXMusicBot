@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"time"
 
 	tg "github.com/amarnathcjd/gogram/telegram"
 
@@ -248,7 +247,12 @@ func (ctx *Context) handleUpdates() {
 				}
 			}
 
-			ctx.callParticipants[chatId].LastMtprotoUpdate = time.Now()
+			// Deliberately NOT touching LastMtprotoUpdate here: an
+			// update only carries the participants that changed, so
+			// stamping the cache as "fresh" made GetParticipants trust a
+			// partial list (e.g. just the assistant) for up to a minute
+			// and report an occupied voice chat as empty. Only a full
+			// fetch in GetParticipants may mark the cache fresh.
 			ctx.callSourcesMutex.Unlock()
 			ctx.participantsMutex.Unlock()
 
