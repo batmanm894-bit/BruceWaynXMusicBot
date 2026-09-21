@@ -96,7 +96,18 @@ func GetTracks(m *telegram.NewMessage, video bool) ([]*state.Track, error) {
 	gologging.Debug("GetTracks called | video: " + strconv.FormatBool(video))
 
 	// 1. URL Processing
-	if urls, _ := utils.ExtractURLs(m); len(urls) > 0 {
+	//
+	// Links typed in the command message itself always win. Links inside
+	// the message being replied to are only used for a bare "/play" (no
+	// text after the command) - otherwise "/play some song" sent as a
+	// reply to any message containing a link (including the bot's own
+	// "now playing" message) would play that link instead of the song
+	// the user actually asked for.
+	urls := utils.ExtractOwnURLs(m)
+	if len(urls) == 0 && m.Args() == "" {
+		urls, _ = utils.ExtractURLs(m)
+	}
+	if len(urls) > 0 {
 		gologging.Debug("URLs detected in message: " + strconv.Itoa(len(urls)))
 		tracks, errs := processURLs(urls, video)
 		if len(tracks) > 0 {
@@ -339,6 +350,7 @@ type raceResult struct {
 	platform state.Platform
 	path     string
 	err      error
+	tag      string
 }
 
 // raceStaggerDelay is how long a lower-priority race candidate waits
@@ -376,6 +388,9 @@ func raceDownload(
 	for i, p := range candidates {
 		i, p := i, p
 		trackCopy := *track
+		// Give every racer its own temp file name (see raceTagPrefix).
+		tag := raceTagPrefix + strconv.Itoa(i)
+		trackCopy.DownloadTag = tag
 
 		// Only stagger platforms that spawn a real OS process (currently
 		// just yt-dlp). Lightweight HTTP-API candidates (FallenApi,
@@ -394,12 +409,12 @@ func raceDownload(
 				select {
 				case <-time.After(delay):
 				case <-raceCtx.Done():
-					results <- raceResult{platform: p, path: "", err: raceCtx.Err()}
+					results <- raceResult{platform: p, path: "", err: raceCtx.Err(), tag: tag}
 					return
 				}
 			}
 			path, err := p.Download(raceCtx, &trackCopy, statusMsg)
-			results <- raceResult{platform: p, path: path, err: err}
+			results <- raceResult{platform: p, path: path, err: err, tag: tag}
 		}()
 	}
 
@@ -409,10 +424,21 @@ func raceDownload(
 
 		if res.err == nil {
 			cancel() // stop every other candidate immediately
+			winPath := finalizeRaceWinner(res.tag, res.path)
 			gologging.Info(
-				"Race won by " + string(res.platform.Name()) + " -> " + res.path,
+				"Race won by " + string(res.platform.Name()) + " -> " + winPath,
 			)
-			return res.path, nil
+
+			// Once every loser has actually stopped, delete whatever
+			// partial files they left behind (never the winner's).
+			remaining := len(candidates) - i - 1
+			go func() {
+				for j := 0; j < remaining; j++ {
+					<-results
+				}
+				cleanupRaceFiles(track, winPath)
+			}()
+			return winPath, nil
 		}
 
 		if errors.Is(res.err, context.Canceled) {
@@ -425,6 +451,8 @@ func raceDownload(
 		gologging.Error("Race candidate failed: " + errMsg)
 		errs = append(errs, errMsg)
 	}
+
+	cleanupRaceFiles(track, "")
 
 	if len(errs) > 0 {
 		return "", combineErrors("Multiple download errors occurred", errs)

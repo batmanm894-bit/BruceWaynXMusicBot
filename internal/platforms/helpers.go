@@ -91,7 +91,7 @@ func downloadKey(track *state.Track) string {
 	if track.Video {
 		t = "video"
 	}
-	return t + "_" + track.ID
+	return t + "_" + track.ID + track.DownloadTag
 }
 
 func getPath(track *state.Track, ext string) string {
@@ -104,7 +104,7 @@ func getPath(track *state.Track, ext string) string {
 		mediaType = "video"
 	}
 
-	filename := mediaType + "_" + track.ID + ext
+	filename := mediaType + "_" + track.ID + track.DownloadTag + ext
 
 	return filepath.Join("downloads", filename)
 }
@@ -129,13 +129,25 @@ func findFile(track *state.Track) string {
 		t = "video"
 	}
 
-	files, err := filepath.Glob(filepath.Join("downloads", t+"_"+track.ID+"*"))
+	prefix := t + "_" + track.ID
+	files, err := filepath.Glob(
+		filepath.Join("downloads", prefix+track.DownloadTag+"*"),
+	)
 	if err != nil {
 		gologging.ErrorF("filepath.Glob: %v", err)
 		return ""
 	}
 
 	for _, f := range files {
+		// A normal lookup must never pick up a racing platform's
+		// temp file (audio_<id>~r0.mp3) - it may still be half-written.
+		if track.DownloadTag == "" &&
+			strings.HasPrefix(
+				strings.TrimPrefix(filepath.Base(f), prefix),
+				raceTagPrefix,
+			) {
+			continue
+		}
 		if i, err := os.Stat(f); err == nil && i.Size() > 0 {
 			return f
 		}
@@ -150,12 +162,64 @@ func findAndRemove(track *state.Track) {
 		t = "video"
 	}
 
-	files, err := filepath.Glob(filepath.Join("downloads", t+"_"+track.ID+"*"))
+	files, err := filepath.Glob(
+		filepath.Join("downloads", t+"_"+track.ID+track.DownloadTag+"*"),
+	)
 	if err != nil {
 		return
 	}
 
 	for _, f := range files {
+		os.Remove(f)
+	}
+}
+
+// raceTagPrefix starts the DownloadTag given to each racing platform
+// (~r0, ~r1, ...). Racing platforms used to share one destination file,
+// so a slower platform being canceled could delete or overwrite the file
+// the winner had just finished - playing a truncated/missing file (the
+// random "glitch") or forcing a re-download.
+const raceTagPrefix = "~r"
+
+// finalizeRaceWinner renames the winner's tagged file to the normal
+// downloads/<type>_<id><ext> name so later cache lookups find it. If the
+// path isn't a tagged file (cached hit, stream URL) or the rename fails,
+// the original path is returned untouched.
+func finalizeRaceWinner(tag, path string) string {
+	dir, base := filepath.Split(path)
+	if tag == "" || !strings.Contains(base, tag) || !fileExists(path) {
+		return path
+	}
+
+	newPath := filepath.Join(dir, strings.Replace(base, tag, "", 1))
+	if newPath == path {
+		return path
+	}
+	if err := os.Rename(path, newPath); err != nil {
+		return path
+	}
+	return newPath
+}
+
+// cleanupRaceFiles deletes every racing platform's leftover temp file for
+// this track except keep (the winner's file, if any).
+func cleanupRaceFiles(track *state.Track, keep string) {
+	t := "audio"
+	if track.Video {
+		t = "video"
+	}
+
+	files, err := filepath.Glob(
+		filepath.Join("downloads", t+"_"+track.ID+raceTagPrefix+"*"),
+	)
+	if err != nil {
+		return
+	}
+
+	for _, f := range files {
+		if keep != "" && f == keep {
+			continue
+		}
 		os.Remove(f)
 	}
 }

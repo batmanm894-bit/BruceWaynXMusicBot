@@ -167,6 +167,34 @@ func (s *SpotifyPlatform) Download(
 	track *state.Track,
 	statusMsg *telegram.NewMessage,
 ) (string, error) {
+	// Try JioSaavn directly first. Spotify metadata ("Song - Artist", and
+	// the real duration when the official API is used) is a much better
+	// key for a JioSaavn search than a YouTube video title, and the match
+	// is verified by title + duration (see saavnMatches). Audio only -
+	// JioSaavn has no video. Any failure just falls through to the
+	// YouTube path below, exactly as before.
+	if !track.Video && len(config.SaavnAPIURLs) > 0 {
+		for _, p := range GetOrderedPlatforms() {
+			if p.Name() != PlatformSaavn {
+				continue
+			}
+			path, err := p.Download(ctx, track, statusMsg)
+			if err == nil {
+				gologging.InfoF(
+					"Downloaded Spotify track '%s' directly from JioSaavn",
+					track.Title,
+				)
+				return path, nil
+			}
+			gologging.DebugF(
+				"[Spotify→Saavn] No direct match for %q: %v",
+				track.Title,
+				err,
+			)
+			break
+		}
+	}
+
 	clean := cleanTitle(track.Title)
 	trimmed := trimTitleLen(clean, 25, 40)
 

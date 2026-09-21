@@ -461,7 +461,15 @@ func (p *YouTubePlatform) fetchMixPlaylist(
 				continue
 			}
 
+			// YouTube returns the title either as {"simpleText": ...} or as
+			// {"runs": [{"text": ...}]} depending on client/response, and
+			// search results (parseNodes) already read the "runs" form. An
+			// empty title here would end the whole autoplay chain, because
+			// autoplay needs the last track's title.
 			title := safeString(dig(vid, "title", "simpleText"))
+			if title == "" {
+				title = safeString(dig(vid, "title", "runs", 0, "text"))
+			}
 			thumb := getThumbnailURL(vid)
 			duration := parseDuration(safeString(dig(vid, "lengthText", "simpleText")))
 

@@ -22,8 +22,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"net/url"
 	"os"
+	"strings"
+	"unicode"
 
 	"github.com/Laky-64/gologging"
 	"github.com/amarnathcjd/gogram/telegram"
@@ -37,17 +40,20 @@ const PlatformSaavn state.PlatformName = "Saavn"
 // saavnSearchResponse covers the JSON shape returned by the
 // sumitkolhe/jiosaavn-api (a.k.a. saavn.dev) "/api/search/songs" endpoint.
 // Only the fields this platform actually needs are declared.
+type saavnResult struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Duration    json.Number `json:"duration"`
+	DownloadURL []struct {
+		Quality string `json:"quality"`
+		URL     string `json:"url"`
+	} `json:"downloadUrl"`
+}
+
 type saavnSearchResponse struct {
 	Success bool `json:"success"`
 	Data    struct {
-		Results []struct {
-			ID          string `json:"id"`
-			Name        string `json:"name"`
-			DownloadURL []struct {
-				Quality string `json:"quality"`
-				URL     string `json:"url"`
-			} `json:"downloadUrl"`
-		} `json:"results"`
+		Results []saavnResult `json:"results"`
 	} `json:"data"`
 }
 
@@ -55,11 +61,8 @@ type saavnSearchResponse struct {
 // downloadUrl array. The API lists qualities from lowest to highest
 // (e.g. 12kbps ... 320kbps), so the last entry is normally the best - but
 // this scans explicitly for "320kbps" first in case ordering ever changes.
-func (r *saavnSearchResponse) bestDownloadURL() string {
-	if len(r.Data.Results) == 0 {
-		return ""
-	}
-	links := r.Data.Results[0].DownloadURL
+func (r *saavnResult) bestDownloadURL() string {
+	links := r.DownloadURL
 	if len(links) == 0 {
 		return ""
 	}
@@ -69,6 +72,88 @@ func (r *saavnSearchResponse) bestDownloadURL() string {
 		}
 	}
 	return links[len(links)-1].URL
+}
+
+// saavnNoiseWords are common YouTube-title decorations that say nothing
+// about which song it is, so they're ignored when comparing titles.
+var saavnNoiseWords = map[string]bool{
+	"official": true, "video": true, "audio": true, "lyrics": true,
+	"lyrical": true, "lyric": true, "full": true, "song": true, "hd": true,
+	"4k": true, "music": true, "visualizer": true, "ft": true, "feat": true,
+	"the": true, "a": true, "and": true, "with": true,
+}
+
+// saavnTokens lowercases s, drops any (bracketed) / [bracketed] text and
+// splits what's left into alphanumeric words, skipping noise words.
+func saavnTokens(s string) []string {
+	s = strings.ToLower(html.UnescapeString(s))
+
+	var b strings.Builder
+	depth := 0
+	for _, r := range s {
+		switch r {
+		case '(', '[':
+			depth++
+			b.WriteRune(' ')
+			continue
+		case ')', ']':
+			if depth > 0 {
+				depth--
+			}
+			b.WriteRune(' ')
+			continue
+		}
+		if depth > 0 {
+			continue
+		}
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune(' ')
+		}
+	}
+
+	var out []string
+	for _, w := range strings.Fields(b.String()) {
+		if !saavnNoiseWords[w] {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// saavnMatches reports whether a JioSaavn search hit is really the same
+// song as the requested YouTube track. JioSaavn is searched by title text
+// only, so without this check the top hit is often a different song, a
+// cover or another version - and because it's fast it wins the download
+// race and the wrong song ends up playing (and cached under the YouTube
+// ID, so it keeps coming back).
+func saavnMatches(track *state.Track, res *saavnResult) bool {
+	if d, err := res.Duration.Int64(); err == nil && d > 0 && track.Duration > 0 {
+		diff := int(d) - track.Duration
+		if diff < 0 {
+			diff = -diff
+		}
+		if diff > 10 {
+			return false
+		}
+	}
+
+	nameTokens := saavnTokens(res.Name)
+	if len(nameTokens) == 0 {
+		return false
+	}
+
+	titleSet := make(map[string]bool)
+	for _, w := range saavnTokens(track.Title) {
+		titleSet[w] = true
+	}
+	for _, w := range nameTokens {
+		if !titleSet[w] {
+			return false
+		}
+	}
+	return true
 }
 
 type SaavnPlatform struct {
@@ -134,7 +219,7 @@ func (s *SaavnPlatform) downloadToDisk(
 	markDownloading(downloadKey(track))
 	defer unmarkDownloading(downloadKey(track))
 
-	mediaURL, err := s.resolveDownloadURL(ctx, track.Title)
+	mediaURL, err := s.resolveDownloadURL(ctx, track)
 	if err != nil {
 		return "", err
 	}
@@ -156,19 +241,21 @@ func (s *SaavnPlatform) downloadToDisk(
 }
 
 // resolveDownloadURL searches JioSaavn's catalog by the track's title and
-// returns the best-quality direct media URL for the top match. Tries every
-// configured base URL in order (self-hosted instances are interchangeable
-// mirrors, not separate accounts, so there's no key rotation here like
+// returns the best-quality direct media URL for the first hit that really
+// matches the requested track (see saavnMatches). Tries every configured
+// base URL in order (self-hosted instances are interchangeable mirrors, not
+// separate accounts, so there's no key rotation here like
 // ShrutiAPI/FallenApi).
 func (s *SaavnPlatform) resolveDownloadURL(
 	ctx context.Context,
-	title string,
+	track *state.Track,
 ) (string, error) {
 	var lastErr error
+	title := track.Title
 
 	for _, base := range config.SaavnAPIURLs {
 		searchURL := fmt.Sprintf(
-			"%s/api/search/songs?query=%s&limit=1",
+			"%s/api/search/songs?query=%s&limit=5",
 			base,
 			url.QueryEscape(title),
 		)
@@ -200,9 +287,21 @@ func (s *SaavnPlatform) resolveDownloadURL(
 			continue
 		}
 
-		mediaURL := parsed.bestDownloadURL()
+		var mediaURL string
+		for i := range parsed.Data.Results {
+			res := &parsed.Data.Results[i]
+			if !saavnMatches(track, res) {
+				continue
+			}
+			mediaURL = res.bestDownloadURL()
+			if mediaURL != "" {
+				break
+			}
+		}
+
 		if mediaURL == "" {
-			lastErr = fmt.Errorf("saavn: no downloadable link for %q on %s", title, base)
+			lastErr = fmt.Errorf("saavn: no confident match for %q on %s", title, base)
+			gologging.Debug("Saavn: " + lastErr.Error())
 			continue
 		}
 

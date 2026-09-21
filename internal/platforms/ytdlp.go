@@ -331,7 +331,11 @@ func (y *YtdlpPlatform) Download(
 	// Cache the real file to disk in the background, using its own
 	// independent context so it survives even if ctx (the caller's/race
 	// context) is later canceled.
-	go y.cacheInBackground(track, safeURL)
+	// The background copy must use the normal filename (not this racer's
+	// temp tag), otherwise it could never be found as a cache later.
+	cacheTrack := *track
+	cacheTrack.DownloadTag = ""
+	go y.cacheInBackground(&cacheTrack, safeURL)
 
 	return streamURL, nil
 }
