@@ -34,6 +34,10 @@ type (
 		Video     bool         // whether this track will be played as video
 		Source    PlatformName // unique PlatformName
 		QueueMsgID int32
+		// DownloadTag is internal: raceDownload sets it on each racing copy so
+		// every platform writes to its own temp file instead of all of them
+		// sharing (and corrupting/deleting) downloads/audio_<id>.mp3.
+		DownloadTag string
 	}
 	PlatformName string
 	// Platform defines a common contract for all supported platforms
