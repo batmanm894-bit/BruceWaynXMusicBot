@@ -22,6 +22,7 @@ import (
 
 	tg "github.com/amarnathcjd/gogram/telegram"
 
+	"main/internal/config"
 	"main/internal/core"
 	state "main/internal/core/models"
 	"main/internal/database"
@@ -98,11 +99,38 @@ const autoplayHistoryKey = "autoplay_history"
 // For YouTube-sourced tracks, it uses YouTube's own "Mix" recommendations
 // (the same same-vibe curation YouTube's own player uses for "up next"),
 // which actually diversifies into different-but-similar tracks. For
-// anything else, it falls back to searching by the previous track's
-// (cleaned) title.
-func autoplayCandidates(last *state.Track) ([]*state.Track, error) {
+// anything else (Spotify, SoundCloud, Telegram...), it first finds the song
+// on YouTube and uses that video's Mix; only if that fails does it fall
+// back to searching by the previous track's (cleaned) title.
+func autoplayCandidates(
+	r *core.RoomState,
+	last *state.Track,
+) ([]*state.Track, error) {
+	seedID := ""
+
 	if last.Source == platforms.PlatformYouTube && last.ID != "" {
-		tracks, err := platforms.GetSimilarTracks(last.ID, 10)
+		seedID = last.ID
+	} else if q := cleanAutoplayQuery(last.Title); q != "" {
+		// Spotify / SoundCloud / Telegram tracks have no YouTube video ID,
+		// so searching by their title used to only resurface the same song
+		// (filtered out as "already played"), and autoplay played nothing
+		// similar. Find the song on YouTube first and use ITS Mix as the
+		// seed, so the next tracks match the language/genre/vibe of what
+		// the user actually played.
+		if found, err := platforms.SearchQuery(q, false); err == nil {
+			for _, f := range found {
+				if f != nil && f.ID != "" {
+					seedID = f.ID
+					// Same song as the one just played - never suggest it.
+					pushAutoplayHistory(r, f.ID, f.Title)
+					break
+				}
+			}
+		}
+	}
+
+	if seedID != "" {
+		tracks, err := platforms.GetSimilarTracks(seedID, 10)
 		if err == nil && len(tracks) > 0 {
 			return tracks, nil
 		}
@@ -126,7 +154,7 @@ func autoplayNextTrack(chatID int64, r *core.RoomState) *state.Track {
 	}
 
 	last := r.Track()
-	if last == nil || last.Title == "" {
+	if last == nil || (last.Title == "" && last.ID == "") {
 		return nil
 	}
 
@@ -135,12 +163,24 @@ func autoplayNextTrack(chatID int64, r *core.RoomState) *state.Track {
 	// can never be re-suggested later in this session either.
 	pushAutoplayHistory(r, last.ID, last.Title)
 
-	tracks, err := autoplayCandidates(last)
+	tracks, err := autoplayCandidates(r, last)
 	if err != nil || len(tracks) == 0 {
 		return nil
 	}
 
 	history := autoplayHistory(r)
+
+	// pick records a candidate in the session history and returns it.
+	pick := func(track *state.Track) *state.Track {
+		track.Requester = F(chatID, "autoplay_requester")
+		pushAutoplayHistory(r, track.ID, track.Title)
+		return track
+	}
+
+	// Candidates whose length is wildly different from the song just played
+	// (podcasts, hour-long mixes, 30-second clips) are rarely the same vibe,
+	// so they're only used if nothing better exists.
+	var fallback *state.Track
 
 	for _, track := range tracks {
 		if track == nil {
@@ -149,9 +189,24 @@ func autoplayNextTrack(chatID int64, r *core.RoomState) *state.Track {
 		if containsEntry(history, track.ID, track.Title) {
 			continue
 		}
-		track.Requester = F(chatID, "autoplay_requester")
-		pushAutoplayHistory(r, track.ID, track.Title)
-		return track
+		// Same limit /play enforces - without it autoplay can pick a
+		// multi-hour mix/compilation as "the next similar song".
+		if track.Duration > config.DurationLimit {
+			continue
+		}
+		if last.Duration > 0 && track.Duration > 0 &&
+			(track.Duration*5 < last.Duration*2 ||
+				track.Duration*2 > last.Duration*5) {
+			if fallback == nil {
+				fallback = track
+			}
+			continue
+		}
+		return pick(track)
+	}
+
+	if fallback != nil {
+		return pick(fallback)
 	}
 
 	return nil

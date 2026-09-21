@@ -31,6 +31,11 @@ import (
 	"main/ntgcalls"
 )
 
+// maxSkipOnDownloadFail is how many further tracks streamEndHandler will try
+// (next in queue, or next autoplay pick) after a download fails before it
+// gives up and closes the room.
+const maxSkipOnDownloadFail = 3
+
 func streamEndHandler(
 	chatID int64,
 	streamType ntgcalls.StreamType,
@@ -136,6 +141,37 @@ func streamEndHandler(
 		filePath = r.FilePath()
 	} else {
 		filePath, err = platforms.Download(context.Background(), t, statusMsg)
+
+		// A single failed download (API 429, yt-dlp hiccup, timeout) used
+		// to tear down the whole room - which also killed autoplay and
+		// dropped everything still queued. Skip ahead to the next queued
+		// track / next autoplay pick a few times before giving up.
+		for attempt := 0; err != nil && attempt < maxSkipOnDownloadFail; attempt++ {
+			if r.IsDestroyed() || r.Loop() > 0 {
+				break
+			}
+
+			gologging.ErrorF(
+				"[onStreamEndHandler] Download failed for %s: %v - trying next track",
+				t.URL,
+				err,
+			)
+
+			var alt *state.Track
+			if len(r.Queue()) > 0 {
+				alt = r.NextTrack()
+				deleteQueueMsg(cid, alt)
+			} else if next := autoplayNextTrack(cid, r); next != nil {
+				r.AddTracksToQueue([]*state.Track{next})
+				alt = r.NextTrack()
+			}
+			if alt == nil {
+				break
+			}
+
+			t = alt
+			filePath, err = platforms.Download(context.Background(), t, statusMsg)
+		}
 	}
 
 	if err != nil {
