@@ -353,10 +353,17 @@ type raceResult struct {
 	tag      string
 }
 
-// raceStaggerDelay is how long a lower-priority race candidate waits
-// (multiplied by its position in the candidate list) before it starts,
-// giving higher-priority candidates a chance to win first without paying
-// the cost of running both at once.
+// raceStaggerDelay is how long each lower-priority race candidate waits
+// (multiplied by its position in the candidate list) before it starts.
+// The whole point of racing is speed, but running every candidate flat-out
+// at once means N simultaneous HTTP calls (or, for yt-dlp, a whole extra
+// OS process) per song - on a free-tier host (Render/Railway free plans)
+// that adds up fast under any real load. Staggering means the first
+// (highest-priority, normally fastest/most reliable) candidate starts
+// immediately, and each one after it only actually starts running if the
+// ones before it haven't already won - so most requests only ever need
+// the one, fast candidate, and the heavier ones stay idle instead of
+// burning CPU/RAM/quota for no reason.
 const raceStaggerDelay = 2 * time.Second
 
 // raceDownload runs every candidate platform's Download concurrently under
@@ -371,6 +378,29 @@ const raceStaggerDelay = 2 * time.Second
 // struct. The track ID itself is left untouched, so whichever platform
 // wins still caches (in the background) to the normal, canonical filename
 // - no rename/relink step needed, and future replays cache-hit normally.
+// raceDelayFor returns how long p should wait before starting, given its
+// position i in the (priority-ordered) candidate list. ShrutiAPI, being
+// the fastest/most reliable in practice, always goes first with no delay.
+// FallenApi and Saavn are both lightweight HTTP-API lookups, so they're
+// given the same delay and start together right after - there's no real
+// resource benefit to staggering two cheap HTTP calls apart from each
+// other. YtDlp spawns a real OS process, so it's held back the longest and
+// only actually starts if nothing cheaper has won by then. Any other
+// platform that ends up in a race falls back to plain index-based
+// staggering.
+func raceDelayFor(p state.Platform, i int) time.Duration {
+	switch p.Name() {
+	case PlatformShrutiAPI:
+		return 0
+	case PlatformFallenApi, PlatformSaavn:
+		return raceStaggerDelay
+	case PlatformYtDlp:
+		return 2 * raceStaggerDelay
+	default:
+		return time.Duration(i) * raceStaggerDelay
+	}
+}
+
 func raceDownload(
 	ctx context.Context,
 	candidates []state.Platform,
@@ -392,17 +422,11 @@ func raceDownload(
 		tag := raceTagPrefix + strconv.Itoa(i)
 		trackCopy.DownloadTag = tag
 
-		// Only stagger platforms that spawn a real OS process (currently
-		// just yt-dlp). Lightweight HTTP-API candidates (FallenApi,
-		// ShrutiAPI, ...) are cheap to run concurrently - staggering them
-		// too only added artificial latency without saving any real
-		// resources, since they don't touch CPU/RAM the way a subprocess
-		// does. yt-dlp still waits, so it isn't spawned at all if a
-		// cheaper candidate has already won by the time its turn comes.
-		delay := time.Duration(0)
-		if p.Name() == PlatformYtDlp {
-			delay = time.Duration(i) * raceStaggerDelay
-		}
+		// Every candidate past the first waits its turn (see
+		// raceStaggerDelay) - only the highest-priority one starts
+		// immediately. A staggered candidate still gets canceled and
+		// skips its wait entirely the moment an earlier one wins.
+		delay := raceDelayFor(p, i)
 
 		go func() {
 			if delay > 0 {

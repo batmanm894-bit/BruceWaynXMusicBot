@@ -250,8 +250,89 @@ func (s *SaavnPlatform) resolveDownloadURL(
 	ctx context.Context,
 	track *state.Track,
 ) (string, error) {
+	// The raw YouTube title (often full of decorations like "Slowed +
+	// Reverb", "Official Video", channel names, etc.) is a weak search
+	// key and is a common reason JioSaavn comes back with "no confident
+	// match". Rather than trying the raw title first and only falling
+	// back to Spotify's clean "Song - Artist" title after it fails (which
+	// adds the Spotify lookup's own latency on top), both searches run at
+	// the same time - whichever finds a confident match first is used,
+	// and the other is abandoned.
+	if track.Source == PlatformSpotify {
+		// Already has a clean "Song - Artist" title - a second Spotify
+		// lookup of the same title would be redundant.
+		return s.searchAllBases(ctx, track, track.Title)
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		url string
+		err error
+	}
+	rawCh := make(chan result, 1)
+	spotifyCh := make(chan result, 1)
+
+	go func() {
+		u, err := s.searchAllBases(ctx, track, track.Title)
+		rawCh <- result{u, err}
+	}()
+
+	go func() {
+		betterTitle := SearchTitle(track.Title)
+		if betterTitle == "" || betterTitle == track.Title {
+			spotifyCh <- result{"", errors.New("saavn: no Spotify-resolved title available")}
+			return
+		}
+		gologging.DebugF(
+			"[Saavn] Also trying Spotify-resolved title: %q -> %q",
+			track.Title,
+			betterTitle,
+		)
+		retryTrack := *track
+		retryTrack.Title = betterTitle
+		u, err := s.searchAllBases(ctx, &retryTrack, betterTitle)
+		spotifyCh <- result{u, err}
+	}()
+
+	// select (not a fixed read order) so whichever of the two actually
+	// finishes first wins immediately - the other is canceled and its
+	// result, if it ever arrives, is ignored.
+	var firstErr error
+	for i := 0; i < 2; i++ {
+		select {
+		case r := <-rawCh:
+			if r.err == nil {
+				cancel()
+				return r.url, nil
+			}
+			firstErr = r.err
+		case r := <-spotifyCh:
+			if r.err == nil {
+				cancel()
+				return r.url, nil
+			}
+			if firstErr == nil {
+				firstErr = r.err
+			}
+		}
+	}
+
+	return "", firstErr
+}
+
+// searchAllBases tries every configured JioSaavn base URL in order,
+// searching by title and validating each hit against origTrack (duration +
+// title tokens, see saavnMatches). origTrack is kept separate from title so
+// a retry can search using a Spotify-resolved title while still validating
+// against the real track's duration/ID.
+func (s *SaavnPlatform) searchAllBases(
+	ctx context.Context,
+	origTrack *state.Track,
+	title string,
+) (string, error) {
 	var lastErr error
-	title := track.Title
 
 	for _, base := range config.SaavnAPIURLs {
 		searchURL := fmt.Sprintf(
@@ -290,7 +371,7 @@ func (s *SaavnPlatform) resolveDownloadURL(
 		var mediaURL string
 		for i := range parsed.Data.Results {
 			res := &parsed.Data.Results[i]
-			if !saavnMatches(track, res) {
+			if !saavnMatches(origTrack, res) {
 				continue
 			}
 			mediaURL = res.bestDownloadURL()

@@ -65,7 +65,11 @@ type ShrutiAPIPlatform struct {
 
 func init() {
 	// Tried right after FallenApi (80) and before YT-DLP (60).
-	Register(75, &ShrutiAPIPlatform{
+	// Tried first among download candidates - in practice the fastest
+	// and most reliable of the free/self-hosted sources, so putting it
+	// first (no stagger delay) means the other, heavier candidates often
+	// never even need to start - keeping load on free-tier hosting low.
+	Register(82, &ShrutiAPIPlatform{
 		name: PlatformShrutiAPI,
 	})
 }

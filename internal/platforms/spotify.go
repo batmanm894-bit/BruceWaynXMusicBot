@@ -167,34 +167,84 @@ func (s *SpotifyPlatform) Download(
 	track *state.Track,
 	statusMsg *telegram.NewMessage,
 ) (string, error) {
-	// Try JioSaavn directly first. Spotify metadata ("Song - Artist", and
-	// the real duration when the official API is used) is a much better
-	// key for a JioSaavn search than a YouTube video title, and the match
-	// is verified by title + duration (see saavnMatches). Audio only -
-	// JioSaavn has no video. Any failure just falls through to the
-	// YouTube path below, exactly as before.
-	if !track.Video && len(config.SaavnAPIURLs) > 0 {
-		for _, p := range GetOrderedPlatforms() {
-			if p.Name() != PlatformSaavn {
-				continue
-			}
-			path, err := p.Download(ctx, track, statusMsg)
-			if err == nil {
-				gologging.InfoF(
-					"Downloaded Spotify track '%s' directly from JioSaavn",
-					track.Title,
-				)
-				return path, nil
-			}
-			gologging.DebugF(
-				"[Spotify→Saavn] No direct match for %q: %v",
-				track.Title,
-				err,
-			)
-			break
-		}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	type result struct {
+		path string
+		err  error
 	}
 
+	// Saavn (metadata-matched) and YouTube are tried at the same time,
+	// not one after the other - trying them sequentially added several
+	// extra seconds to every Spotify play whenever Saavn didn't have a
+	// match, since YouTube wouldn't even start searching until Saavn had
+	// already failed. Whichever finishes first with a real file wins;
+	// the moment either succeeds, ctx is canceled so the other stops
+	// immediately instead of wasting time/bandwidth on a losing attempt.
+	saavnCh := make(chan result, 1)
+	youtubeCh := make(chan result, 1)
+
+	// Try JioSaavn directly. Spotify metadata ("Song - Artist", and the
+	// real duration when the official API is used) is a much better key
+	// for a JioSaavn search than a YouTube video title, and the match is
+	// verified by title + duration (see saavnMatches). Audio only -
+	// JioSaavn has no video.
+	if !track.Video && len(config.SaavnAPIURLs) > 0 {
+		go func() {
+			for _, p := range GetOrderedPlatforms() {
+				if p.Name() != PlatformSaavn {
+					continue
+				}
+				path, err := p.Download(ctx, track, statusMsg)
+				if err == nil {
+					gologging.InfoF(
+						"Downloaded Spotify track '%s' directly from JioSaavn",
+						track.Title,
+					)
+				} else {
+					gologging.DebugF(
+						"[Spotify→Saavn] No direct match for %q: %v",
+						track.Title,
+						err,
+					)
+				}
+				saavnCh <- result{path, err}
+				return
+			}
+			saavnCh <- result{"", errors.New("saavn not available")}
+		}()
+	} else {
+		saavnCh <- result{"", errors.New("saavn not applicable")}
+	}
+
+	go func() {
+		path, err := s.downloadViaYouTube(ctx, track, statusMsg)
+		youtubeCh <- result{path, err}
+	}()
+
+	saavnRes, youtubeRes := <-saavnCh, <-youtubeCh
+
+	if saavnRes.err == nil {
+		cancel()
+		return saavnRes.path, nil
+	}
+	if youtubeRes.err == nil {
+		cancel()
+		return youtubeRes.path, nil
+	}
+
+	return "", youtubeRes.err
+}
+
+// downloadViaYouTube is the original Spotify→YouTube fallback path:
+// search YouTube using the Spotify title/artist, then download the best
+// match through whichever YouTube-capable downloader succeeds.
+func (s *SpotifyPlatform) downloadViaYouTube(
+	ctx context.Context,
+	track *state.Track,
+	statusMsg *telegram.NewMessage,
+) (string, error) {
 	clean := cleanTitle(track.Title)
 	trimmed := trimTitleLen(clean, 25, 40)
 
@@ -267,6 +317,60 @@ func (s *SpotifyPlatform) Download(
 	}
 
 	return "", errors.New("no YouTube downloader available")
+}
+
+// SearchTitle looks up query (typically a messy YouTube video title) on
+// Spotify's official catalog and returns the canonical "Song - Artist"
+// title for the best match, or "" if no official Spotify credentials are
+// configured or nothing is found. Used by SaavnPlatform as a second
+// attempt when a JioSaavn search using the raw YouTube title finds no
+// confident match - Spotify's clean title is a much better search key.
+func SearchTitle(query string) string {
+	if config.SpotifyClientID == "" || config.SpotifyClientSecret == "" {
+		return ""
+	}
+	if query == "" {
+		return ""
+	}
+
+	var sp *SpotifyPlatform
+	for _, p := range GetOrderedPlatforms() {
+		if sp2, ok := p.(*SpotifyPlatform); ok {
+			sp = sp2
+			break
+		}
+	}
+	if sp == nil {
+		return ""
+	}
+	if err := sp.ensureClient(); err != nil {
+		return ""
+	}
+
+	res, err := sp.client.Search(
+		context.Background(),
+		query,
+		spotify.SearchTypeTrack,
+		spotify.Limit(1),
+	)
+	if err != nil || res.Tracks == nil || len(res.Tracks.Tracks) == 0 {
+		return ""
+	}
+
+	found := res.Tracks.Tracks[0]
+	title := found.Name
+	if len(found.Artists) > 0 {
+		names := make([]string, 0, len(found.Artists))
+		for _, a := range found.Artists {
+			if a.Name != "" {
+				names = append(names, a.Name)
+			}
+		}
+		if len(names) > 0 {
+			title = title + " - " + strings.Join(names, ", ")
+		}
+	}
+	return title
 }
 
 // spotifyOEmbedResponse mirrors the fields we need from Spotify's public,

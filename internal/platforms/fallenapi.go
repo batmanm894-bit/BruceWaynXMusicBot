@@ -51,7 +51,7 @@ type FallenApiPlatform struct {
 }
 
 func init() {
-	Register(80, &FallenApiPlatform{
+	Register(78, &FallenApiPlatform{
 		name: PlatformFallenApi,
 	})
 }
