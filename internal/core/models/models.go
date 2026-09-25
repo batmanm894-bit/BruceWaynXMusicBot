@@ -34,6 +34,12 @@ type (
 		Video     bool         // whether this track will be played as video
 		Source    PlatformName // unique PlatformName
 		QueueMsgID int32
+		// Query is the raw text the user typed after /play (e.g. "jheel by
+		// hardik"), set only when the track came from a plain-text search.
+		// It's usually a much cleaner search key than Title, which for
+		// YouTube results is the full video title (decorations, channel
+		// names, hashtags and all) - see saavn.go's use of this field.
+		Query string
 		// DownloadTag is internal: raceDownload sets it on each racing copy so
 		// every platform writes to its own temp file instead of all of them
 		// sharing (and corrupting/deleting) downloads/audio_<id>.mp3.
