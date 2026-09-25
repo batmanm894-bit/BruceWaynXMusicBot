@@ -42,6 +42,16 @@ const PlatformShrutiAPI state.PlatformName = "ShrutiAPI"
 // from hammering the API with dozens of doomed requests per song.
 var shrutiCooldownUntil atomic.Int64
 
+// ShrutiAPICoolingDown reports whether ShrutiAPI is currently in its post-429
+// cooldown window, meaning it will fail instantly (no network call at all)
+// rather than actually compete in the download race. raceDelayFor uses this
+// to skip the usual stagger delay for the candidates behind it - there's no
+// reason to make FallenApi/Saavn wait their turn for a platform that's
+// guaranteed to bow out immediately.
+func ShrutiAPICoolingDown() bool {
+	return time.Now().Unix() < shrutiCooldownUntil.Load()
+}
+
 // shrutiAPIErrorResponse covers the JSON shape ShrutiAPI sends back on
 // failure (e.g. invalid key, rate limit). On success it does NOT return
 // JSON at all - it streams the raw audio/video bytes directly as the

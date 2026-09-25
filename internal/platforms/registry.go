@@ -191,7 +191,12 @@ func processSearchQuery(query string, video bool) ([]*state.Track, error) {
 
 	if len(tracks) > 0 {
 		gologging.Info("YouTube search successful, returning top result")
-		return []*state.Track{tracks[0]}, nil
+		top := tracks[0]
+		// Keep what the user actually typed - it's normally a cleaner
+		// search key for other platforms (e.g. Saavn) than the YouTube
+		// video's own title. See saavn.go.
+		top.Query = query
+		return []*state.Track{top}, nil
 	}
 
 	gologging.Debug("YouTube search returned 0 results for: " + query)
@@ -384,15 +389,21 @@ const raceStaggerDelay = 2 * time.Second
 // FallenApi and Saavn are both lightweight HTTP-API lookups, so they're
 // given the same delay and start together right after - there's no real
 // resource benefit to staggering two cheap HTTP calls apart from each
-// other. YtDlp spawns a real OS process, so it's held back the longest and
-// only actually starts if nothing cheaper has won by then. Any other
-// platform that ends up in a race falls back to plain index-based
-// staggering.
+// other. But that stagger only makes sense while ShrutiAPI is actually in
+// the running: if it's currently cooling down after a 429, it fails
+// instantly with no network call at all, so there's nothing to wait for -
+// FallenApi/Saavn start immediately instead. YtDlp spawns a real OS
+// process, so it's held back the longest and only actually starts if
+// nothing cheaper has won by then. Any other platform that ends up in a
+// race falls back to plain index-based staggering.
 func raceDelayFor(p state.Platform, i int) time.Duration {
 	switch p.Name() {
 	case PlatformShrutiAPI:
 		return 0
 	case PlatformFallenApi, PlatformSaavn:
+		if ShrutiAPICoolingDown() {
+			return 0
+		}
 		return raceStaggerDelay
 	case PlatformYtDlp:
 		return 2 * raceStaggerDelay

@@ -271,14 +271,38 @@ func (s *SaavnPlatform) resolveDownloadURL(
 		url string
 		err error
 	}
+
+	// queryCh carries the raw text the user actually typed after /play
+	// (e.g. "jheel by hardik"). When present it's normally a far cleaner
+	// search key than the YouTube video's own title, which is often
+	// stuffed with channel names, hashtags and decorations that make
+	// JioSaavn's search come back with no confident match - so it's tried
+	// first, alongside (not instead of) the other two.
+	queryCh := make(chan result, 1)
 	rawCh := make(chan result, 1)
 	spotifyCh := make(chan result, 1)
 
+	pending := 0
+
+	if track.Query != "" && track.Query != track.Title {
+		pending++
+		go func() {
+			gologging.DebugF(
+				"[Saavn] Also trying user's raw query: %q",
+				track.Query,
+			)
+			u, err := s.searchAllBases(ctx, track, track.Query)
+			queryCh <- result{u, err}
+		}()
+	}
+
+	pending++
 	go func() {
 		u, err := s.searchAllBases(ctx, track, track.Title)
 		rawCh <- result{u, err}
 	}()
 
+	pending++
 	go func() {
 		betterTitle := SearchTitle(track.Title)
 		if betterTitle == "" || betterTitle == track.Title {
@@ -296,18 +320,26 @@ func (s *SaavnPlatform) resolveDownloadURL(
 		spotifyCh <- result{u, err}
 	}()
 
-	// select (not a fixed read order) so whichever of the two actually
-	// finishes first wins immediately - the other is canceled and its
-	// result, if it ever arrives, is ignored.
+	// select (not a fixed read order) so whichever candidate actually
+	// finishes first with a confident match wins immediately - the rest
+	// are canceled and their results, if they ever arrive, are ignored.
 	var firstErr error
-	for i := 0; i < 2; i++ {
+	for i := 0; i < pending; i++ {
 		select {
-		case r := <-rawCh:
+		case r := <-queryCh:
 			if r.err == nil {
 				cancel()
 				return r.url, nil
 			}
 			firstErr = r.err
+		case r := <-rawCh:
+			if r.err == nil {
+				cancel()
+				return r.url, nil
+			}
+			if firstErr == nil {
+				firstErr = r.err
+			}
 		case r := <-spotifyCh:
 			if r.err == nil {
 				cancel()
