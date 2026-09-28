@@ -393,9 +393,12 @@ const raceStaggerDelay = 2 * time.Second
 // the running: if it's currently cooling down after a 429, it fails
 // instantly with no network call at all, so there's nothing to wait for -
 // FallenApi/Saavn start immediately instead. YtDlp spawns a real OS
-// process, so it's held back the longest and only actually starts if
-// nothing cheaper has won by then. Any other platform that ends up in a
-// race falls back to plain index-based staggering.
+// process, so it still gets a small head start for the others to try
+// first - but only one raceStaggerDelay's worth (same as FallenApi/Saavn),
+// not two: with valid cookies it resolves a stream URL quickly and
+// reliably, so handicapping it further than that just means it loses
+// races it could otherwise win. Any other platform that ends up in a race
+// falls back to plain index-based staggering.
 func raceDelayFor(p state.Platform, i int) time.Duration {
 	switch p.Name() {
 	case PlatformShrutiAPI:
@@ -406,7 +409,14 @@ func raceDelayFor(p state.Platform, i int) time.Duration {
 		}
 		return raceStaggerDelay
 	case PlatformYtDlp:
-		return 2 * raceStaggerDelay
+		// If the cheap HTTP-API sources are already known to be dead
+		// (ShrutiAPI in its 429 cooldown and every FallenApi key marked
+		// dead/rate-limited), yt-dlp is realistically the only source
+		// left that can win - waiting behind them just adds latency.
+		if ShrutiAPICoolingDown() && fallenAllKeysDown() {
+			return 0
+		}
+		return raceStaggerDelay / 2
 	default:
 		return time.Duration(i) * raceStaggerDelay
 	}

@@ -21,10 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"regexp"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Laky-64/gologging"
@@ -157,8 +159,14 @@ func (f *FallenApiPlatform) getDownloadURL(
 	mediaURL string,
 ) (string, error) {
 	var lastErr error
+	triedAny := false
 
 	for _, key := range shuffledKeys(config.FallenAPIKeys) {
+		if fallenKeyCoolingDown(key) {
+			continue
+		}
+		triedAny = true
+
 		apiReqURL := fmt.Sprintf(
 			"%s/api/track?api_key=%s&url=%s",
 			config.FallenAPIURL,
@@ -196,6 +204,19 @@ func (f *FallenApiPlatform) getDownloadURL(
 				resp.String(),
 			), key)
 			gologging.Debug("FallenApi: key failed, trying next -> " + lastErr.Error())
+
+			// 401 here means the key itself is invalid/unrecognized (not
+			// the URL/video) - that's never going to start working again
+			// on its own, so stop wasting a request on it every single
+			// race until someone fixes the config and restarts. 429 means
+			// the key is fine but temporarily out of quota - worth
+			// retrying again later, so it only gets a timed cooldown.
+			switch resp.StatusCode() {
+			case 401:
+				markFallenKeyDead(key, true)
+			case 429:
+				markFallenKeyDead(key, false)
+			}
 			continue
 		}
 
@@ -212,10 +233,73 @@ func (f *FallenApiPlatform) getDownloadURL(
 	}
 
 	if lastErr == nil {
-		lastErr = errors.New("fallenapi: no keys configured")
+		if !triedAny && len(config.FallenAPIKeys) > 0 {
+			lastErr = errors.New(
+				"fallenapi: all keys are currently cooling down (invalid/rate-limited)",
+			)
+		} else {
+			lastErr = errors.New("fallenapi: no keys configured")
+		}
 	}
 	gologging.Error(lastErr.Error())
 	return "", lastErr
+}
+
+// fallenDeadKeys tracks, per API key, a unix timestamp until which that key
+// is skipped entirely (no HTTP request spent on it). Mirrors ShrutiAPI's
+// cooldown but per-key rather than global, since a multi-key setup can have
+// some keys dead and others fine at the same time.
+var fallenDeadKeys sync.Map
+
+// fallenPermanentDeadline stands in for "until the process restarts" -
+// config keys never change without a redeploy, and a key the API itself
+// says doesn't exist isn't going to start existing on its own.
+const fallenPermanentDeadline = math.MaxInt64
+
+func fallenKeyCoolingDown(key string) bool {
+	v, ok := fallenDeadKeys.Load(key)
+	if !ok {
+		return false
+	}
+	until, _ := v.(int64)
+	return time.Now().Unix() < until
+}
+
+// markFallenKeyDead skips key for future requests: permanently (until
+// restart) for an unrecoverable failure like "API Key not found" (401),
+// or for 10 minutes for a temporary one like a rate limit (429). On the
+// transition into cooldown (not on repeated hits while it's already
+// skipped), it alerts the log chat and the owner's DM, naming which key
+// (masked) and why - and for the 429 case, since the cooldown is 10
+// minutes, a key that's still exhausted naturally re-triggers this same
+// transition and re-alerts roughly every 10 minutes until it recovers.
+func markFallenKeyDead(key string, permanent bool) {
+	wasAlreadyDead := fallenKeyCoolingDown(key)
+
+	until := int64(fallenPermanentDeadline)
+	if !permanent {
+		until = time.Now().Add(10 * time.Minute).Unix()
+	}
+	fallenDeadKeys.Store(key, until)
+
+	if wasAlreadyDead {
+		return
+	}
+	if permanent {
+		sendAdminAlert(fmt.Sprintf(
+			"⚠️ FallenApi: key ending in %s is invalid (API key not "+
+				"found) and will be skipped until the bot is restarted "+
+				"with a corrected/removed key.",
+			maskKey(key),
+		))
+		return
+	}
+	sendAdminAlert(fmt.Sprintf(
+		"⚠️ FallenApi: key ending in %s hit a rate limit (quota "+
+			"exhausted) and will be skipped for 10 minutes at a time "+
+			"until it recovers.",
+		maskKey(key),
+	))
 }
 
 func (f *FallenApiPlatform) downloadFromURL(
@@ -282,3 +366,19 @@ func (f *FallenApiPlatform) downloadFromTelegram(
 	return path, nil
 }
 
+
+// fallenAllKeysDown reports whether FallenApi can't possibly serve a
+// request right now: no keys configured, or every key is in its
+// dead/rate-limited cooldown. Lets the race start slower-but-working
+// sources (yt-dlp) immediately instead of waiting behind it.
+func fallenAllKeysDown() bool {
+	if len(config.FallenAPIKeys) == 0 {
+		return true
+	}
+	for _, key := range config.FallenAPIKeys {
+		if !fallenKeyCoolingDown(key) {
+			return false
+		}
+	}
+	return true
+}

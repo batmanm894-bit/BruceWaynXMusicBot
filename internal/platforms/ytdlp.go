@@ -28,6 +28,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Laky-64/gologging"
@@ -39,6 +40,61 @@ import (
 )
 
 const PlatformYtDlp state.PlatformName = "YtDlp"
+
+// ytdlpCooldownUntil holds a unix timestamp until which yt-dlp is skipped
+// after a bot-detection failure (expired/invalid cookies). Mirrors
+// ShrutiAPI's 429 cooldown: without it, every single race would spawn a
+// full yt-dlp OS process just to watch it fail the exact same way, over
+// and over, until someone notices and uploads fresh cookies. The cooldown
+// clears itself on the next process restart (e.g. after a redeploy with
+// updated cookies), same as ShrutiAPI's.
+var ytdlpCooldownUntil atomic.Int64
+
+// isBotDetectionError reports whether err is YouTube telling yt-dlp its
+// cookies are missing/expired/invalid, rather than a one-off network
+// hiccup, a killed process, or an unrelated failure. Those phrases are
+// yt-dlp's actual, stable error text for this case.
+func isBotDetectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "sign in to confirm") ||
+		strings.Contains(msg, "not a bot") ||
+		strings.Contains(msg, "the page needs to be reloaded")
+}
+
+// YtDlpCoolingDown reports whether yt-dlp is currently being skipped after
+// a recent bot-detection failure. raceDelayFor/CanDownload-style callers
+// can use this the same way they check ShrutiAPICoolingDown.
+func YtDlpCoolingDown() bool {
+	return time.Now().Unix() < ytdlpCooldownUntil.Load()
+}
+
+// markBotDetectionIfNeeded starts (or extends) the cooldown when err looks
+// like a bot-detection/cookie failure. Called from every place yt-dlp can
+// fail on a YouTube URL. On the transition into cooldown (not on repeated
+// hits while it's already active), it also alerts the log chat and the
+// owner's DM - and since the cooldown is 10 minutes, if the cookies are
+// still broken the next attempt after that naturally re-triggers this
+// same transition and re-alerts, roughly every 10 minutes, until someone
+// uploads fresh cookies and restarts the bot.
+func markBotDetectionIfNeeded(err error) {
+	if !isBotDetectionError(err) {
+		return
+	}
+	wasAlreadyCoolingDown := YtDlpCoolingDown()
+	ytdlpCooldownUntil.Store(time.Now().Add(10 * time.Minute).Unix())
+	if wasAlreadyCoolingDown {
+		return
+	}
+	sendAdminAlert(
+		"⚠️ YtDlp: YouTube cookies look expired/invalid (bot-detection " +
+			"failure). YtDlp will keep retrying every 10 minutes and " +
+			"re-alert each time this happens again, until fresh cookies " +
+			"are uploaded and the bot is restarted.\n\nError: " + err.Error(),
+	)
+}
 
 type YtdlpPlatform struct {
 	name state.PlatformName
@@ -299,6 +355,12 @@ func (y *YtdlpPlatform) Download(
 		return f, nil
 	}
 
+	if y.isYouTubeURL(track.URL) && YtDlpCoolingDown() {
+		return "", errors.New(
+			"yt-dlp cooling down after a bot-detection failure (cookies likely expired/invalid)",
+		)
+	}
+
 	safeURL, err := sanitizeMediaURL(track.URL)
 	if err != nil {
 		return "", errUnsafeURL
@@ -321,6 +383,14 @@ func (y *YtdlpPlatform) Download(
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
+		}
+		markBotDetectionIfNeeded(err)
+		if isBotDetectionError(err) {
+			// The full-download fallback uses the exact same cookies, so
+			// it would fail the exact same way - and it's a heavier spawn
+			// than the -g attempt that just failed. No point paying that
+			// cost too; return the real error straight away.
+			return "", err
 		}
 		gologging.Debug(
 			"YtDlp: instant stream URL failed, falling back to direct download: " + err.Error(),
@@ -351,6 +421,11 @@ func (y *YtdlpPlatform) getStreamURL(
 		"--no-playlist",
 		"--no-warnings",
 		"--no-check-certificate",
+		// Fail fast instead of sitting through yt-dlp's default
+		// retry/backoff loops - the race has other sources anyway.
+		"--socket-timeout", "10",
+		"--retries", "1",
+		"--extractor-retries", "1",
 		"-f", "ba[abr>=180][abr<=360]/ba/b",
 		"-g",
 	}
@@ -510,7 +585,11 @@ func (y *YtdlpPlatform) downloadToDisk(
 			return "", ctx.Err()
 		}
 
-		return "", fmt.Errorf("yt-dlp error: %w", runErr)
+		wrapped := fmt.Errorf("yt-dlp error: %w (%s)", runErr, errStr)
+		if y.isYouTubeURL(track.URL) {
+			markBotDetectionIfNeeded(wrapped)
+		}
+		return "", wrapped
 	}
 
 	path := findFile(track)
