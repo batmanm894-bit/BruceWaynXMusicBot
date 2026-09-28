@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -68,32 +69,55 @@ func isBotDetectionError(err error) bool {
 // a recent bot-detection failure. raceDelayFor/CanDownload-style callers
 // can use this the same way they check ShrutiAPICoolingDown.
 func YtDlpCoolingDown() bool {
-	return time.Now().Unix() < ytdlpCooldownUntil.Load()
+	return time.Now().Unix() < ytdlpCooldownUntil.Load() ||
+		cookies.AllCookiesDown()
 }
 
-// markBotDetectionIfNeeded starts (or extends) the cooldown when err looks
-// like a bot-detection/cookie failure. Called from every place yt-dlp can
-// fail on a YouTube URL. On the transition into cooldown (not on repeated
-// hits while it's already active), it also alerts the log chat and the
-// owner's DM - and since the cooldown is 10 minutes, if the cookies are
-// still broken the next attempt after that naturally re-triggers this
-// same transition and re-alerts, roughly every 10 minutes, until someone
-// uploads fresh cookies and restarts the bot.
-func markBotDetectionIfNeeded(err error) {
+// handleCookieFailure reacts to a YouTube bot-detection failure of the
+// cookie file that was used (cookieFile == "" means none was configured).
+// Only that one file is switched off for 10 minutes - the other files keep
+// working - and the owner/log chat is alerted naming the file. yt-dlp as a
+// whole is only skipped once every cookie file is dead (see
+// YtDlpCoolingDown). Since dead files come back after 10 minutes, a file
+// that is still broken re-alerts about every 10 minutes until it's replaced
+// and the bot restarted.
+func handleCookieFailure(cookieFile string, err error) {
 	if !isBotDetectionError(err) {
 		return
 	}
-	wasAlreadyCoolingDown := YtDlpCoolingDown()
-	ytdlpCooldownUntil.Store(time.Now().Add(10 * time.Minute).Unix())
-	if wasAlreadyCoolingDown {
+
+	if cookieFile == "" {
+		was := YtDlpCoolingDown()
+		ytdlpCooldownUntil.Store(time.Now().Add(10 * time.Minute).Unix())
+		if !was {
+			sendAdminAlert(
+				"⚠️ YtDlp: YouTube is blocking requests and no cookie " +
+					"file is configured. Add cookies to internal/cookies/ " +
+					"and restart.\n\nError: " + err.Error(),
+			)
+		}
 		return
 	}
-	sendAdminAlert(
-		"⚠️ YtDlp: YouTube cookies look expired/invalid (bot-detection " +
-			"failure). YtDlp will keep retrying every 10 minutes and " +
-			"re-alert each time this happens again, until fresh cookies " +
-			"are uploaded and the bot is restarted.\n\nError: " + err.Error(),
-	)
+
+	if cookies.MarkCookieDead(cookieFile, 10*time.Minute) {
+		return
+	}
+
+	name := filepath.Base(cookieFile)
+	if cookies.AllCookiesDown() {
+		sendAdminAlert(
+			"⚠️ YtDlp: cookie file " + name + " expired and it was the " +
+				"last working one - all cookie files are dead, YtDlp is " +
+				"skipped until you upload fresh cookies and restart.\n\n" +
+				"Error: " + err.Error(),
+		)
+		return
+	}
+	sendAdminAlert(fmt.Sprintf(
+		"⚠️ YtDlp: cookie file %s expired and is switched off (retried "+
+			"every 10 min). %d other cookie file(s) still working.",
+		name, cookies.LiveCookieCount(),
+	))
 }
 
 type YtdlpPlatform struct {
@@ -380,11 +404,16 @@ func (y *YtdlpPlatform) Download(
 	// resolves a URL first wins, instead of whichever downloads first).
 	gologging.InfoF("YtDlp: Resolving stream URL for %s", track.Title)
 	streamURL, err := y.getStreamURL(ctx, safeURL)
+	if err != nil && ctx.Err() == nil && isBotDetectionError(err) &&
+		!YtDlpCoolingDown() {
+		// That cookie file was just switched off but others still work -
+		// retry once right away with a different one.
+		streamURL, err = y.getStreamURL(ctx, safeURL)
+	}
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		markBotDetectionIfNeeded(err)
 		if isBotDetectionError(err) {
 			// The full-download fallback uses the exact same cookies, so
 			// it would fail the exact same way - and it's a heavier spawn
@@ -430,9 +459,10 @@ func (y *YtdlpPlatform) getStreamURL(
 		"-g",
 	}
 
+	var cookieFile string
 	if y.isYouTubeURL(safeURL) {
-		if cookieFile, err := cookies.GetRandomCookieFile(); err == nil &&
-			cookieFile != "" {
+		if f, err := cookies.GetRandomCookieFile(); err == nil && f != "" {
+			cookieFile = f
 			args = append(args, "--cookies", cookieFile)
 		}
 	}
@@ -459,9 +489,13 @@ func (y *YtdlpPlatform) getStreamURL(
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
-		return "", fmt.Errorf(
+		wrapped := fmt.Errorf(
 			"yt-dlp -g failed: %w (%s)", err, strings.TrimSpace(stderr.String()),
 		)
+		if y.isYouTubeURL(safeURL) {
+			handleCookieFailure(cookieFile, wrapped)
+		}
+		return "", wrapped
 	}
 
 	fields := strings.Fields(strings.TrimSpace(stdout.String()))
@@ -545,9 +579,10 @@ func (y *YtdlpPlatform) downloadToDisk(
 	}
 
 	// Cookies (YouTube only)
+	var cookieFile string
 	if y.isYouTubeURL(track.URL) {
-		if cookieFile, err := cookies.GetRandomCookieFile(); err == nil &&
-			cookieFile != "" {
+		if f, err := cookies.GetRandomCookieFile(); err == nil && f != "" {
+			cookieFile = f
 			args = append(args, "--cookies", cookieFile)
 		}
 	}
@@ -587,7 +622,7 @@ func (y *YtdlpPlatform) downloadToDisk(
 
 		wrapped := fmt.Errorf("yt-dlp error: %w (%s)", runErr, errStr)
 		if y.isYouTubeURL(track.URL) {
-			markBotDetectionIfNeeded(wrapped)
+			handleCookieFailure(cookieFile, wrapped)
 		}
 		return "", wrapped
 	}
