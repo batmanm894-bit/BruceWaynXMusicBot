@@ -151,14 +151,69 @@ func loadCookieCache() error {
 	return nil
 }
 
-func GetRandomCookieFile() (string, error) {
-	var err error
+// deadCookies maps a cookie file path to the unix time until which it is
+// skipped after YouTube rejected it (expired/invalid session).
+var deadCookies sync.Map
 
+func ensureCookieCache() error {
+	var err error
 	cacheOnce.Do(func() {
 		err = loadCookieCache()
 	})
+	return err
+}
 
-	if err != nil {
+func cookieIsDead(path string) bool {
+	v, ok := deadCookies.Load(path)
+	if !ok {
+		return false
+	}
+	until, _ := v.(int64)
+	return time.Now().Unix() < until
+}
+
+// MarkCookieDead skips path for d. It returns true if the file was already
+// marked dead (so callers can avoid alerting twice for one failure burst).
+func MarkCookieDead(path string, d time.Duration) (wasAlready bool) {
+	wasAlready = cookieIsDead(path)
+	deadCookies.Store(path, time.Now().Add(d).Unix())
+	return wasAlready
+}
+
+// AllCookiesDown reports whether cookie files are configured but every one
+// of them is currently marked dead.
+func AllCookiesDown() bool {
+	if err := ensureCookieCache(); err != nil || len(cachedFiles) == 0 {
+		return false
+	}
+	for _, f := range cachedFiles {
+		if !cookieIsDead(f) {
+			return false
+		}
+	}
+	return true
+}
+
+// LiveCookieCount returns how many configured cookie files are not
+// currently marked dead.
+func LiveCookieCount() int {
+	if err := ensureCookieCache(); err != nil {
+		return 0
+	}
+	n := 0
+	for _, f := range cachedFiles {
+		if !cookieIsDead(f) {
+			n++
+		}
+	}
+	return n
+}
+
+// GetRandomCookieFile picks a random cookie file, preferring ones that
+// aren't marked dead. If every file is dead it still returns one, so
+// callers that must run anyway aren't left without any cookies.
+func GetRandomCookieFile() (string, error) {
+	if err := ensureCookieCache(); err != nil {
 		gologging.WarnF("Failed to load cookie cache: %v", err)
 		return "", err
 	}
@@ -168,7 +223,17 @@ func GetRandomCookieFile() (string, error) {
 		return "", nil
 	}
 
-	return cachedFiles[rand.Intn(len(cachedFiles))], nil
+	live := make([]string, 0, len(cachedFiles))
+	for _, f := range cachedFiles {
+		if !cookieIsDead(f) {
+			live = append(live, f)
+		}
+	}
+	if len(live) == 0 {
+		live = cachedFiles
+	}
+
+	return live[rand.Intn(len(live))], nil
 }
 
 // GetRandomCookieHeader picks a random cookie file (same pool used for
