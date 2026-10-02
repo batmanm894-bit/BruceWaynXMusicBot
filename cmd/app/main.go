@@ -35,6 +35,7 @@ import (
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Laky-64/gologging"
@@ -141,8 +142,25 @@ func startHTTPServer() {
 	}()
 }
 
+// applyLogLevel sets the global log level from the LOG_LEVEL env var
+// (debug|info|warn|error). Defaults to info: debug level floods the host's
+// log pipeline (Railway drops lines above 500 logs/sec), which hides the
+// lines leading up to a crash.
+func applyLogLevel() {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOG_LEVEL"))) {
+	case "debug":
+		gologging.SetLevel(gologging.DebugLevel)
+	case "warn", "warning":
+		gologging.SetLevel(gologging.WarnLevel)
+	case "error":
+		gologging.SetLevel(gologging.ErrorLevel)
+	default:
+		gologging.SetLevel(gologging.InfoLevel)
+	}
+}
+
 func initLogger() {
-	gologging.SetLevel(gologging.DebugLevel)
+	applyLogLevel()
 	gologging.SetOutput(config.LogWriter)
 
 	l := gologging.GetLogger("ntgcalls")
