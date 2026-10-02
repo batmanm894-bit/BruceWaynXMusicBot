@@ -596,7 +596,9 @@ func downloadFirstTrack(
 				F(chatID, "play_download_canceled", locales.Arg{"user": mention}),
 			)
 		} else {
+			gologging.ErrorF("Download failed for %q in chat %d: %v", title, chatID, err)
 			utils.EOR(replyMsg, F(chatID, "play_download_failed", locales.Arg{
+				"bot_link": "https://t.me/" + core.Bot.Me().Username + "?start=start",
 				"title": title,
 				"error": utils.EscapeHTML(err.Error()),
 			}))

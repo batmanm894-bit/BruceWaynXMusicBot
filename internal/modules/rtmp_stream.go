@@ -183,7 +183,9 @@ func handleStream(m *tg.NewMessage, force bool) error {
 				"user": mention,
 			}))
 		} else {
+			gologging.ErrorF("Download failed for %q in chat %d: %v", track.Title, chatID, err)
 			utils.EOR(replyMsg, F(chatID, "play_download_failed", locales.Arg{
+				"bot_link": "https://t.me/" + core.Bot.Me().Username + "?start=start",
 				"title": utils.EscapeHTML(utils.ShortTitle(track.Title, 25)),
 				"error": utils.EscapeHTML(err.Error()),
 			}))
