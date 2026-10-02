@@ -14,10 +14,16 @@ COPY go.mod go.sum ./
 COPY install.sh ./
 COPY . .
 
+# Crash debugging: symbols are kept (no "-w -s") so a crash address like
+# 0x201d51a can be resolved. Set build arg CGOCHECK2=1 to also enable the
+# strict cgo pointer checker (slower; turn it off again once the crash is
+# found).
+ARG CGOCHECK2=0
 RUN go mod tidy && \
     chmod +x install.sh && \
     ./install.sh -n && \
-    CGO_ENABLED=1 go build -v -trimpath -ldflags="-w -s" -o app ./cmd/app/
+    if [ "$CGOCHECK2" = "1" ]; then export GOEXPERIMENT=cgocheck2; fi && \
+    CGO_ENABLED=1 go build -v -trimpath -o app ./cmd/app/
 
 
 FROM debian:bookworm-slim
@@ -38,6 +44,9 @@ RUN curl -fL \
     curl -fsSL https://deno.land/install.sh -o /tmp/deno-install.sh && \
     sh /tmp/deno-install.sh && \
     rm -f /tmp/deno-install.sh
+
+# Full goroutine dump + abort on fatal errors, easier to debug native crashes.
+ENV GOTRACEBACK=crash
 
 ENV DENO_INSTALL=/root/.deno
 ENV PATH=$DENO_INSTALL/bin:$PATH
