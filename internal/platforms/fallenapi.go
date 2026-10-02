@@ -26,6 +26,7 @@ import (
 	"os"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -205,17 +206,22 @@ func (f *FallenApiPlatform) getDownloadURL(
 			), key)
 			gologging.Debug("FallenApi: key failed, trying next -> " + lastErr.Error())
 
-			// 401 here means the key itself is invalid/unrecognized (not
-			// the URL/video) - that's never going to start working again
-			// on its own, so stop wasting a request on it every single
-			// race until someone fixes the config and restarts. 429 means
-			// the key is fine but temporarily out of quota - worth
-			// retrying again later, so it only gets a timed cooldown.
-			switch resp.StatusCode() {
-			case 401:
-				markFallenKeyDead(key, true)
-			case 429:
-				markFallenKeyDead(key, false)
+			// 401 = key invalid/unrecognized, 403 with "expired"/"invalid"
+			// style body (e.g. {"code":403,"message":"Plan expired"}) = the
+			// key's plan is over. Neither will ever start working again on
+			// its own, so the key is switched off until restart/redeploy
+			// instead of wasting a request on it every single race.
+			// 429 means the key is fine but temporarily out of quota -
+			// worth retrying later, so it only gets a timed cooldown.
+			switch {
+			case resp.StatusCode() == 401:
+				markFallenKeyDead(key, true, "API key invalid/not found")
+			case resp.StatusCode() == 403 && isDeadKeyBody(resp.String()):
+				markFallenKeyDead(key, true, "plan expired/key disabled")
+			case resp.StatusCode() == 403:
+				markFallenKeyDead(key, false, "forbidden (403)")
+			case resp.StatusCode() == 429:
+				markFallenKeyDead(key, false, "rate limit / daily quota exhausted")
 			}
 			continue
 		}
@@ -273,7 +279,7 @@ func fallenKeyCoolingDown(key string) bool {
 // (masked) and why - and for the 429 case, since the cooldown is 10
 // minutes, a key that's still exhausted naturally re-triggers this same
 // transition and re-alerts roughly every 10 minutes until it recovers.
-func markFallenKeyDead(key string, permanent bool) {
+func markFallenKeyDead(key string, permanent bool, reason string) {
 	wasAlreadyDead := fallenKeyCoolingDown(key)
 
 	until := int64(fallenPermanentDeadline)
@@ -287,19 +293,43 @@ func markFallenKeyDead(key string, permanent bool) {
 	}
 	if permanent {
 		sendAdminAlert(fmt.Sprintf(
-			"⚠️ FallenApi: key ending in %s is invalid (API key not "+
-				"found) and will be skipped until the bot is restarted "+
-				"with a corrected/removed key.",
-			maskKey(key),
+			"⚠️ FallenApi: key ending in %s is dead (%s) and is switched "+
+				"off until the bot is restarted with a corrected/removed key. "+
+				"%d other key(s) still active.",
+			maskKey(key), reason, fallenLiveKeyCount(),
 		))
 		return
 	}
 	sendAdminAlert(fmt.Sprintf(
-		"⚠️ FallenApi: key ending in %s hit a rate limit (quota "+
-			"exhausted) and will be skipped for 10 minutes at a time "+
-			"until it recovers.",
-		maskKey(key),
+		"⚠️ FallenApi: key ending in %s is temporarily switched off for "+
+			"10 minutes (%s). %d other key(s) still active.",
+		maskKey(key), reason, fallenLiveKeyCount(),
 	))
+}
+
+// fallenLiveKeyCount returns how many configured FallenApi keys are not
+// currently switched off.
+func fallenLiveKeyCount() int {
+	n := 0
+	for _, k := range config.FallenAPIKeys {
+		if !fallenKeyCoolingDown(k) {
+			n++
+		}
+	}
+	return n
+}
+
+// isDeadKeyBody reports whether an API error body says the key itself is
+// unusable (expired plan, invalid/disabled key) as opposed to a one-off
+// failure for a particular video.
+func isDeadKeyBody(body string) bool {
+	b := strings.ToLower(body)
+	return strings.Contains(b, "expired") ||
+		strings.Contains(b, "invalid") ||
+		strings.Contains(b, "not found") ||
+		strings.Contains(b, "disabled") ||
+		strings.Contains(b, "suspended") ||
+		strings.Contains(b, "revoked")
 }
 
 func (f *FallenApiPlatform) downloadFromURL(

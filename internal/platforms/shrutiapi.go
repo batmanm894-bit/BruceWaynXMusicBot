@@ -23,8 +23,9 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"math"
 	"os"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/Laky-64/gologging"
@@ -37,19 +38,72 @@ import (
 
 const PlatformShrutiAPI state.PlatformName = "ShrutiAPI"
 
-// shrutiCooldownUntil holds a unix timestamp until which ShrutiAPI is skipped
-// after it answered 429 (quota exhausted / rate limited). This stops the bot
-// from hammering the API with dozens of doomed requests per song.
-var shrutiCooldownUntil atomic.Int64
+// shrutiDeadKeys tracks, per API key, a unix timestamp until which that key
+// is skipped (no HTTP request spent on it). A 429 (quota/rate limit) only
+// switches that one key off for 10 minutes; 401/403 with an
+// expired/invalid style body switches it off until restart. The other
+// keys keep working normally.
+var shrutiDeadKeys sync.Map
 
-// ShrutiAPICoolingDown reports whether ShrutiAPI is currently in its post-429
-// cooldown window, meaning it will fail instantly (no network call at all)
-// rather than actually compete in the download race. raceDelayFor uses this
-// to skip the usual stagger delay for the candidates behind it - there's no
-// reason to make FallenApi/Saavn wait their turn for a platform that's
-// guaranteed to bow out immediately.
+const shrutiPermanentDeadline = math.MaxInt64
+
+func shrutiKeyCoolingDown(key string) bool {
+	v, ok := shrutiDeadKeys.Load(key)
+	if !ok {
+		return false
+	}
+	until, _ := v.(int64)
+	return time.Now().Unix() < until
+}
+
+func shrutiLiveKeyCount() int {
+	n := 0
+	for _, k := range config.ShrutiAPIKeys {
+		if !shrutiKeyCoolingDown(k) {
+			n++
+		}
+	}
+	return n
+}
+
+func markShrutiKeyDead(key string, permanent bool, reason string) {
+	wasAlreadyDead := shrutiKeyCoolingDown(key)
+
+	until := int64(shrutiPermanentDeadline)
+	if !permanent {
+		until = time.Now().Add(10 * time.Minute).Unix()
+	}
+	shrutiDeadKeys.Store(key, until)
+
+	if wasAlreadyDead {
+		return
+	}
+	if permanent {
+		sendAdminAlert(fmt.Sprintf(
+			"⚠️ ShrutiAPI: key ending in %s is dead (%s) and is switched "+
+				"off until the bot is restarted with a corrected/removed key. "+
+				"%d other key(s) still active.",
+			maskKey(key), reason, shrutiLiveKeyCount(),
+		))
+		return
+	}
+	sendAdminAlert(fmt.Sprintf(
+		"⚠️ ShrutiAPI: key ending in %s is temporarily switched off for "+
+			"10 minutes (%s). %d other key(s) still active.",
+		maskKey(key), reason, shrutiLiveKeyCount(),
+	))
+}
+
+// ShrutiAPICoolingDown reports whether ShrutiAPI can't serve a request
+// right now: no keys configured, or EVERY key is switched off (expired or
+// rate-limited). While at least one key is alive this is false. When true
+// it fails instantly (no network call), so raceDelayFor uses it to skip
+// the stagger delay for the candidates behind it.
 func ShrutiAPICoolingDown() bool {
-	return time.Now().Unix() < shrutiCooldownUntil.Load()
+	if len(config.ShrutiAPIKeys) == 0 {
+		return true
+	}
+	return shrutiLiveKeyCount() == 0
 }
 
 // shrutiAPIErrorResponse covers the JSON shape ShrutiAPI sends back on
@@ -169,11 +223,15 @@ func (s *ShrutiAPIPlatform) fetchAndSave(
 ) error {
 	var lastErr error
 
-	if until := shrutiCooldownUntil.Load(); time.Now().Unix() < until {
-		return fmt.Errorf("shrutiapi cooling down after 429 (quota/rate limit)")
+	if ShrutiAPICoolingDown() {
+		return fmt.Errorf("shrutiapi cooling down: all keys expired/rate-limited")
 	}
 
 	for _, key := range shuffledKeys(config.ShrutiAPIKeys) {
+		if shrutiKeyCoolingDown(key) {
+			continue
+		}
+	baseLoop:
 		for _, base := range config.ShrutiAPIURLs {
 			apiReqURL := fmt.Sprintf(
 				"%s/download?url=%s&type=%s&api_key=%s",
@@ -207,9 +265,19 @@ func (s *ShrutiAPIPlatform) fetchAndSave(
 					base, resp.StatusCode(), msg,
 				), key)
 				gologging.Debug("ShrutiAPI: key/url failed, trying next -> " + lastErr.Error())
-				if resp.StatusCode() == 429 {
-					shrutiCooldownUntil.Store(time.Now().Add(10 * time.Minute).Unix())
-					return lastErr
+				switch {
+				case resp.StatusCode() == 401,
+					resp.StatusCode() == 403 && isDeadKeyBody(msg):
+					// Key itself is dead (invalid / plan expired): stop
+					// using it and move on to the next key.
+					markShrutiKeyDead(key, true, "invalid key / plan expired")
+					break baseLoop
+				case resp.StatusCode() == 429:
+					// Quota is per key, so the other base URLs would
+					// answer the same: switch only this key off for a
+					// while and try the next key.
+					markShrutiKeyDead(key, false, "rate limit / daily quota exhausted")
+					break baseLoop
 				}
 				continue
 			}
