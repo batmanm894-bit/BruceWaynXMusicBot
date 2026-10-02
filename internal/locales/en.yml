@@ -489,8 +489,12 @@ play_single_track_too_long: |
   <i>{title}</i> was skipped.
 
 play_download_failed: |
-  ❌ Failed to download "<i>{title}</i>".
-  Error: <code>{error}</code>
+  ❌ —— <a href="{bot_link}"><b>Bruce Music</b></a> —— ❌
+
+  ▸ <b>{title}</b>
+
+  <pre>┌ Status   Download failed
+  └ Tip      Try again or pick another song</pre>
 
 play_added_to_queue_single: |
   ✦ <b>QUEUED</b> ✦ <i>via</i> <a href="{bot_link}"><b>Bruce Music</b></a>

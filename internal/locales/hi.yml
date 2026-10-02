@@ -485,8 +485,12 @@ play_single_track_too_long: |
   <i>{title}</i> को छोड़ दिया गया।
 
 play_download_failed: |
-  ❌ "<i>{title}</i>" को अभिलेखित करने में विफल।
-  त्रुटि: <code>{error}</code>
+  ❌ —— <a href="{bot_link}"><b>Bruce Music</b></a> —— ❌
+
+  ▸ <b>{title}</b>
+
+  <pre>┌ स्थिति   डाउनलोड विफल
+  └ सुझाव   दोबारा कोशिश करें या दूसरा गाना चुनें</pre>
 
 play_added_to_queue_single: |
   <b>🎵 प्रतीक्षा सूची में जोड़ा गया:</b> #{index}
