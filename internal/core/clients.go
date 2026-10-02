@@ -75,9 +75,9 @@ func initBot() error {
 		AppID:   config.APIID,
 		AppHash: config.APIHash,
 		Logger: telegram.WrapSimpleLogger(
-			GetTgLogger("gogram", telegram.LogDebug),
+			GetTgLogger("gogram", GogramLogLevel()),
 		),
-		LogLevel:     telegram.LogDebug,
+		LogLevel:     GogramLogLevel(),
 		ParseMode:    "HTML",
 		Session:      "bot.session",
 		FloodHandler: handleFlood,

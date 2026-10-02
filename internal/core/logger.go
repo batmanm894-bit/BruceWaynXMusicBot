@@ -19,6 +19,8 @@ package core
 
 import (
 	"io"
+	"os"
+	"strings"
 
 	"github.com/Laky-64/gologging"
 	"github.com/amarnathcjd/gogram/telegram"
@@ -98,3 +100,19 @@ func (l *TgLogger) GetOutput() any {
 }
 
 func (l *TgLogger) SetTimestampFormat(s string) {}
+
+// GogramLogLevel maps the LOG_LEVEL env var (debug|info|warn|error) to the
+// gogram log level. Defaults to info so the per-chunk download progress
+// lines don't flood the log pipeline.
+func GogramLogLevel() telegram.LogLevel {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("LOG_LEVEL"))) {
+	case "debug":
+		return telegram.DebugLevel
+	case "warn", "warning":
+		return telegram.WarnLevel
+	case "error":
+		return telegram.ErrorLevel
+	default:
+		return telegram.InfoLevel
+	}
+}
