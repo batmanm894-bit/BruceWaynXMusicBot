@@ -62,6 +62,10 @@ var (
 	MaxConcurrentYtdlp  int
 	StartImages         []string
 	EffectIDs           []int64
+
+	// Join-verify: DM new joiners / join-requesters of these chats.
+	VerifyChatIDs       []int64
+	VerifyGroupFallback bool
 	PingImage           string
 	Port                string
 	EnablePprof         bool
@@ -151,6 +155,8 @@ func loadConfig() {
 	MaxConcurrentYtdlp = int(getInt64("MAX_CONCURRENT_YTDLP", 2))
 	StartImages = getStringSlice("START_IMAGES", nil)
 	EffectIDs = getInt64Slice("EFFECT_IDS", nil)
+	VerifyChatIDs = getInt64Slice("VERIFY_CHAT_IDS", nil)
+	VerifyGroupFallback = getBool("VERIFY_GROUP_FALLBACK", true)
 	if len(StartImages) == 0 {
 		StartImage := getString("START_IMG_URL", "")
 		if StartImage != "" {
