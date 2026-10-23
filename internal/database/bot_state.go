@@ -46,6 +46,10 @@ type BotState struct {
 	Maintenance   Maintenance `bson:"maint,omitempty"`
     
 	NoThumb       bool        `bson:"no_thumb"`
+
+	// Platforms (ShrutiAPI, Saavn, ...) the owner switched off.
+	// Stored lowercase. No omitempty so that "all on" really clears it.
+	DisabledPlatforms []string `bson:"disabled_platforms"`
 	// runtime indexes for fast lookup
 	servedUsersMap map[int64]struct{} `bson:"-"`
 	servedChatsMap map[int64]struct{} `bson:"-"`

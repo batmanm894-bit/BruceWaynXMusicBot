@@ -43,7 +43,12 @@ var (
 func Init(mongoURL string) (func(), error) {
 	var err error
 	logger.Debug("Initializing MongoDB...")
-	client, err = mongo.Connect(options.Client().ApplyURI(mongoURL))
+	client, err = mongo.Connect(
+		options.Client().
+			ApplyURI(mongoURL).
+			SetConnectTimeout(10 * time.Second).
+			SetServerSelectionTimeout(15 * time.Second),
+	)
 	if err != nil {
 		return nil, err
 	}
