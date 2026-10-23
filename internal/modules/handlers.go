@@ -223,6 +223,11 @@ var handlers = []MsgHandlerDef{
 		Filters: []telegram.Filter{ownerFilter, ignoreChannelFilter},
 	},
 	{
+		Pattern: "(platform|platforms)",
+		Handler: platformToggleHandler,
+		Filters: []telegram.Filter{ownerFilter, ignoreChannelFilter},
+	},
+	{
 		Pattern: "logger",
 		Handler: handleLogger,
 		Filters: []telegram.Filter{sudoOnlyFilter, ignoreChannelFilter},
@@ -611,6 +616,7 @@ var handlers = []MsgHandlerDef{
 }
 
 var cbHandlers = []CbHandlerDef{
+	{Pattern: "^verify_ok$", Handler: verifyCB},
 	{Pattern: "start", Handler: startCB},
 	{Pattern: "help_cb", Handler: helpCB},
 	{Pattern: "^lang:[a-z]", Handler: langCallbackHandler},
@@ -658,6 +664,7 @@ func Init(bot *telegram.Client, assistants *core.AssistantManager) {
 	bot.On("participant", handleParticipantUpdate).SetGroup(70)
 	bot.AddActionHandler(handleActions)
 	bot.AddRawHandler(&telegram.UpdateReadChannelOutbox{}, cleanModeReadHandler)
+	bot.AddRawHandler(&telegram.UpdateBotChatInviteRequester{}, joinRequestHandler)
 
 	assistants.ForEach(func(a *core.Assistant) {
 		a.Ntg.OnStreamEnd(streamEndHandler)

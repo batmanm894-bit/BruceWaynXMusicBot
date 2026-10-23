@@ -116,6 +116,7 @@ func handleParticipantUpdate(p *telegram.ParticipantUpdate) error {
 		(newStatus == "member" || newStatus == "administrator" || newStatus == "creator"):
 
 		handleSudoJoin(p, chatID)
+		go handleVerifyJoin(p.Client, chatID, userID, p.User)
 	}
 
 	if state != nil && userID == state.Assistant.Self.ID {

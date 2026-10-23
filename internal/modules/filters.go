@@ -47,6 +47,7 @@ func filterSuperGroup(m *tg.NewMessage) bool {
 	case tg.EntityChat:
 		// EntityChat can be basic group or supergroup — allow only supergroup
 		if m.Channel != nil && !m.Channel.Broadcast {
+			rememberChatTitle(m.ChannelID(), m.Channel.Title)
 			database.AddServedChat(m.ChannelID())
 			return true // Supergroup
 		}

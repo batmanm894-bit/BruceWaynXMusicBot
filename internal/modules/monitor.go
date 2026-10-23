@@ -20,6 +20,7 @@ package modules
 import (
 	"time"
 
+	"github.com/Laky-64/gologging"
 	"github.com/amarnathcjd/gogram/telegram"
 
 	"main/internal/core"
@@ -38,6 +39,12 @@ func MonitorRooms() {
 
 			go func(chatID int64, r *core.RoomState) {
 				defer func() { <-sem }()
+				// A bad status message must never take the whole bot down.
+				defer func() {
+					if rec := recover(); rec != nil {
+						gologging.ErrorF("monitor: recovered in chat %d: %v", chatID, rec)
+					}
+				}()
 
 				if !r.IsActiveChat() {
 					/*
@@ -67,7 +74,12 @@ func MonitorRooms() {
 					ReplyMarkup: markup,
 					Entities:    statusMsg.Message.Entities,
 				}
-				statusMsg.Edit(statusMsg.Text(), opts)
+				if _, err := statusMsg.Edit(statusMsg.Text(), opts); err != nil {
+					// Message was deleted by someone: stop editing it every 4s.
+					if telegram.MatchError(err, "MESSAGE_ID_INVALID") {
+						r.SetStatusMsg(nil)
+					}
+				}
 			}(chatID, room)
 		}
 	}

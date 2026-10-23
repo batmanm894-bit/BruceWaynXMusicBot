@@ -337,14 +337,14 @@ type panicInfo struct {
 
 func getPanicInfo(ctx, r any) panicInfo {
 	var info panicInfo
-	info.errorMessage = html.EscapeString(fmt.Sprint(r))
+	info.errorMessage = html.EscapeString(trimRunes(fmt.Sprint(r), 400))
 
 	switch c := ctx.(type) {
 	case *tg.NewMessage:
 		info.userMention = utils.MentionHTML(c.Sender)
 		info.handlerType = "message"
 		info.chatInfo = "ChatID: " + utils.IntToStr(c.ChannelID())
-		info.messageInfo = "Message: " + html.EscapeString(c.Text()) + "\nLink: " + c.Link()
+		info.messageInfo = "Message: " + html.EscapeString(trimRunes(c.Text(), 300)) + "\nLink: " + c.Link()
 		info.client = c.Client
 
 	case *tg.CallbackQuery:
@@ -360,7 +360,6 @@ func getPanicInfo(ctx, r any) panicInfo {
 func handlePanic(r, ctx any, isPanic bool) {
 	info := getPanicInfo(ctx, r)
 	stackRaw := debug.Stack()
-	stackEsc := html.EscapeString(string(stackRaw))
 
 	logPrefix := "🚨 Error"
 	shortPrefix := "<b>Error</b>"
@@ -371,24 +370,33 @@ func handlePanic(r, ctx any, isPanic bool) {
 
 	logMsg := fmt.Sprintf("%s in %s handler:\nFrom: %s\n%s\n%s\nError: `%v`",
 		logPrefix, info.handlerType, info.userMention, info.chatInfo, info.messageInfo, r)
-	shortMsg := fmt.Sprintf("%s in %s handler\n<b>From:</b> %s\n%s\n%s\n<b>Error:</b>\n<code>%s</code>",
-		shortPrefix, info.handlerType, info.userMention, info.chatInfo, info.messageInfo, info.errorMessage)
-
 	if isPanic {
 		logMsg += "\nStack:\n" + string(stackRaw)
-		shortMsg += "\n<pre>" + stackEsc + "</pre>"
 	}
 
 	gologging.Error(logMsg)
 
-	if config.LoggerID != 0 && info.client != nil {
-		if _, sendErr := info.client.SendMessage(config.LoggerID, shortMsg, &tg.SendOptions{ParseMode: "HTML"}); sendErr != nil {
-			gologging.ErrorF(
-				"failed to send panic message to log chat: %v",
-				sendErr,
-			)
-		}
+	// Errors go ONLY to the owner's DM, at most once per hour (digest).
+	// The log group is no longer used for errors.
+	ownerMsg := fmt.Sprintf("%s in %s handler\n<b>From:</b> %s\n%s\n%s\n<b>Error:</b>\n<code>%s</code>",
+		shortPrefix, info.handlerType, info.userMention, info.chatInfo, info.messageInfo, info.errorMessage)
+	if isPanic {
+		ownerMsg += "\n<pre>" + html.EscapeString(trimRunes(string(stackRaw), 1200)) + "</pre>"
 	}
+	firstLine := fmt.Sprint(r)
+	if i := strings.IndexByte(firstLine, '\n'); i >= 0 {
+		firstLine = firstLine[:i]
+	}
+	core.NotifyOwner(info.handlerType+"|"+trimRunes(firstLine, 100), ownerMsg)
+}
+
+// trimRunes cuts s to at most n runes (safe for multi-byte text).
+func trimRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "..."
 }
 
 func warnAndLeave(client *tg.Client, chatID int64) {

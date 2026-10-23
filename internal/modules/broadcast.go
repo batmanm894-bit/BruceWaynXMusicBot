@@ -481,9 +481,7 @@ func (bm *BroadcastManager) sendMessage(
 	}
 
 	if err != nil {
-		if !tg.MatchError(err, "USER_IS_BLOCKED") &&
-			!tg.MatchError(err, "CHAT_WRITE_FORBIDDEN") &&
-			!tg.MatchError(err, "USER_IS_DEACTIVATED") {
+		if !isQuietBroadcastErr(err) {
 			gologging.ErrorF("Broadcast failed for %d: %v", targetID, err)
 		}
 		return err
@@ -720,4 +718,23 @@ func (bm *BroadcastManager) sleepCtx(
 	case <-time.After(d):
 		return true
 	}
+}
+
+// isQuietBroadcastErr: expected "this target is unreachable" errors that
+// are already counted in the broadcast report - no need to spam the logs.
+func isQuietBroadcastErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	for _, code := range []string{
+		"USER_IS_BLOCKED", "CHAT_WRITE_FORBIDDEN", "USER_IS_DEACTIVATED",
+		"INPUT_USER_DEACTIVATED", "USER_DEACTIVATED", "CHANNEL_PRIVATE",
+		"CHAT_RESTRICTED", "CHANNEL_INVALID", "CHAT_ID_INVALID",
+	} {
+		if tg.MatchError(err, code) {
+			return true
+		}
+	}
+	m := err.Error()
+	return strings.Contains(m, "missing from cache")
 }
