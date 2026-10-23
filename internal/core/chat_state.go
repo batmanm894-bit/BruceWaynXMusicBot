@@ -54,7 +54,17 @@ type ChatState struct {
 	inviteLink string
 	snapshot   StateSnapshot
 	fetched    bool
+
+	// Admin-permission failures: retry at most every adminRetryAfter, and
+	// log at most once per adminLogEvery (instead of on every message).
+	adminFailUntil time.Time
+	adminLastLog   time.Time
 }
+
+const (
+	adminRetryAfter = 30 * time.Second
+	adminLogEvery   = 10 * time.Minute
+)
 
 var (
 	chatStatesMu sync.Mutex
@@ -86,14 +96,34 @@ func (s *ChatState) Snapshot(force bool) (StateSnapshot, error) {
 	s.mu.RLock()
 	cached := s.snapshot
 	fetched := s.fetched
+	blockedUntil := s.adminFailUntil
 	s.mu.RUnlock()
 	if fetched && !force {
 		return cached, nil
 	}
+	if !force && time.Now().Before(blockedUntil) {
+		return StateSnapshot{}, ErrAdminPermissionRequired
+	}
 	if err := s.refresh(); err != nil {
-		gologging.ErrorF("chat_state: refresh failed for %d: %v", s.ChatID, err)
+		if errors.Is(err, ErrAdminPermissionRequired) {
+			s.mu.Lock()
+			s.adminFailUntil = time.Now().Add(adminRetryAfter)
+			shouldLog := time.Since(s.adminLastLog) > adminLogEvery
+			if shouldLog {
+				s.adminLastLog = time.Now()
+			}
+			s.mu.Unlock()
+			if shouldLog {
+				gologging.ErrorF("chat_state: admin permission required in %d (logged once per 10 min)", s.ChatID)
+			}
+		} else {
+			gologging.ErrorF("chat_state: refresh failed for %d: %v", s.ChatID, err)
+		}
 		return StateSnapshot{}, err
 	}
+	s.mu.Lock()
+	s.adminFailUntil = time.Time{}
+	s.mu.Unlock()
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.snapshot, nil
@@ -162,10 +192,10 @@ func (s *ChatState) refresh() error {
 	}
 	full, err := utils.GetFullChannel(Bot, s.ChatID)
 	if err != nil {
-		gologging.ErrorF("chat_state: GetFullChannel failed for %d: %v", s.ChatID, err)
 		if isAdminError(err) {
 			return ErrAdminPermissionRequired
 		}
+		gologging.ErrorF("chat_state: GetFullChannel failed for %d: %v", s.ChatID, err)
 		return fmt.Errorf("%w: %v", ErrStateFetchFailed, err)
 	}
 
@@ -177,7 +207,6 @@ func (s *ChatState) refresh() error {
 			return nil
 		}
 		if isAdminError(err) {
-			gologging.ErrorF("chat_state: admin permission required for GetChatMember in %d", s.ChatID)
 			return ErrAdminPermissionRequired
 		}
 		return fmt.Errorf("%w: %v", ErrStateFetchFailed, err)
