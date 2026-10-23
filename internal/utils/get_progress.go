@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 
+	"github.com/Laky-64/gologging"
 	"github.com/amarnathcjd/gogram/telegram"
 )
 
@@ -37,6 +38,11 @@ func GetProgress(statusMsg *telegram.NewMessage) *telegram.ProgressManager {
 	}
 
 	pm.WithCallback(func(pi *telegram.ProgressInfo) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				gologging.ErrorF("progress callback recovered: %v", rec)
+			}
+		}()
 		text := fmt.Sprintf(
 			"<b>📥 Downloading your track...</b>\n"+
 				"<pre>"+
