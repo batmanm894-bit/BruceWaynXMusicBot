@@ -1,32 +1,25 @@
 package platforms
 
 import (
-	"github.com/Laky-64/gologging"
+	"html"
 
 	"main/internal/config"
 	"main/internal/core"
 )
 
-// sendAdminAlert notifies both the bot's log chat/channel and the owner's
-// DM about something that needs a human's attention (expired cookies, a
-// dead API key, ...) - both, since either one on its own might go
-// unnoticed for a while. Best-effort: a delivery failure here is only
-// logged, never surfaced to whoever's using the bot.
+// sendAdminAlert notifies ONLY the owner's DM (not the log group), at most
+// once per hour in total - repeats are merged into one digest message
+// (see core.NotifyOwner). Best-effort, never surfaced to bot users.
 func sendAdminAlert(text string) {
-	seen := make(map[int64]bool, 2)
-	for _, chatID := range []int64{config.LoggerID, config.OwnerID} {
-		if chatID == 0 || seen[chatID] {
-			continue
-		}
-		seen[chatID] = true
-		go func(id int64) {
-			if _, err := core.Bot.SendMessage(id, text); err != nil {
-				gologging.WarnF("Failed to send admin alert to %d: %v", id, err)
-			}
-		}(chatID)
+	if config.OwnerID == 0 {
+		return
 	}
+	key := text
+	if len(key) > 200 {
+		key = key[:200]
+	}
+	core.NotifyOwner(key, "<b>Alert</b>\n"+html.EscapeString(text))
 }
-
 // maskKey returns just enough of an API key to identify it in a message
 // without exposing the whole thing (e.g. in a log chat/channel other
 // people might be able to read).

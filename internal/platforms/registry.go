@@ -84,6 +84,9 @@ func GetOrderedPlatforms() []state.Platform {
 
 func findPlatform(url string) state.Platform {
 	for _, p := range GetOrderedPlatforms() {
+		if IsDisabled(p.Name()) {
+			continue
+		}
 		if p.CanGetTracks(url) {
 			return p
 		}
@@ -261,7 +264,14 @@ func Download(
 
 	var candidates []state.Platform
 	var audioOnlyFallbacks []state.Platform
+	switchedOff := 0
 	for _, p := range GetOrderedPlatforms() {
+		// Owner switched this platform off (/platform <name> off): never try it.
+		if IsDisabled(p.Name()) {
+			gologging.Debug("Platform [" + string(p.Name()) + "] is switched off by owner, skipping")
+			switchedOff++
+			continue
+		}
 		if !p.CanDownload(track.Source) {
 			gologging.Debug(
 				"Platform [" + string(p.Name()) + "] cannot download source: " + string(track.Source),
@@ -294,7 +304,11 @@ func Download(
 	}
 
 	if len(candidates) == 0 {
-		return "", errors.New("no downloader available for source: " + string(track.Source))
+		msg := "no downloader available for source: " + string(track.Source)
+		if switchedOff > 0 {
+			msg += " (some platforms are switched off by owner)"
+		}
+		return "", errors.New(msg)
 	}
 
 	// Video needs a full local (muxed) file before it can play at all, so
@@ -404,7 +418,7 @@ func raceDelayFor(p state.Platform, i int) time.Duration {
 	case PlatformShrutiAPI:
 		return 0
 	case PlatformFallenApi, PlatformSaavn:
-		if ShrutiAPICoolingDown() {
+		if ShrutiAPICoolingDown() || IsDisabled(PlatformShrutiAPI) {
 			return 0
 		}
 		return raceStaggerDelay
@@ -413,7 +427,8 @@ func raceDelayFor(p state.Platform, i int) time.Duration {
 		// (ShrutiAPI in its 429 cooldown and every FallenApi key marked
 		// dead/rate-limited), yt-dlp is realistically the only source
 		// left that can win - waiting behind them just adds latency.
-		if ShrutiAPICoolingDown() && fallenAllKeysDown() {
+		if (ShrutiAPICoolingDown() || IsDisabled(PlatformShrutiAPI)) &&
+			(fallenAllKeysDown() || IsDisabled(PlatformFallenApi)) {
 			return 0
 		}
 		return raceStaggerDelay / 2
