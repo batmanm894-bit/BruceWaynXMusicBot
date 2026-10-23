@@ -32,6 +32,7 @@ import "C"
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -78,6 +79,9 @@ func main() {
 	defer closeDB()
 
 	gologging.Info("Database connected successfully")
+
+	// Restore which platforms the owner switched off (/platform).
+	platforms.LoadDisabledFromDB()
 
 	if err := locales.Load(); err != nil {
 		gologging.Fatal("Failed to load locales: " + err.Error())
@@ -165,13 +169,27 @@ func initLogger() {
 
 	l := gologging.GetLogger("ntgcalls")
 	l.SetLevel(gologging.ErrorLevel)
-	l.SetOutput(config.LogWriter)
+	l.SetOutput(nativeNoiseFilter{w: config.LogWriter})
 
 	l = gologging.GetLogger("webrtc")
 	l.SetLevel(gologging.ErrorLevel)
 	l.SetOutput(config.LogWriter)
 
 	gologging.GetLogger("Database").SetOutput(config.LogWriter)
+}
+
+// nativeNoiseFilter drops two harmless, very frequent native log lines:
+// "Call <id> not found" (call already ended) and "Unable to set playout
+// device" (no sound card on the server). Everything else passes through.
+type nativeNoiseFilter struct{ w io.Writer }
+
+func (f nativeNoiseFilter) Write(p []byte) (int, error) {
+	s := string(p)
+	if (strings.Contains(s, "ntgcalls.cpp") && strings.Contains(s, "not found")) ||
+		strings.Contains(s, "Unable to set playout device") {
+		return len(p), nil
+	}
+	return f.w.Write(p)
 }
 
 func refreshDirs() error {
