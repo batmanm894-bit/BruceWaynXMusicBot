@@ -597,6 +597,7 @@ func downloadFirstTrack(
 			)
 		} else {
 			gologging.ErrorF("Download failed for %q in chat %d: %v", title, chatID, err)
+			notifyLoggerPlayFail(m.Client, chatID, mention, m.SenderID(), track, "download", err)
 			utils.EOR(replyMsg, F(chatID, "play_download_failed", locales.Arg{
 				"bot_link": "https://t.me/" + core.Bot.Me().Username + "?start=start",
 				"title": title,
@@ -774,6 +775,7 @@ func playTrackWithRetry(
 					playMaxRetries,
 				) + " attempts. Error: " + err.Error(),
 			)
+			notifyLoggerPlayFail(replyMsg.Client, replyMsg.ChannelID(), "", 0, track, "play", err)
 			utils.EOR(
 				replyMsg,
 				F(replyMsg.ChannelID(), "play_failed", locales.Arg{"error": err.Error()}),

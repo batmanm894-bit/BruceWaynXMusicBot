@@ -22,7 +22,6 @@ import (
 	"github.com/Laky-64/gologging"
 	"github.com/amarnathcjd/gogram/telegram"
 
-	"main/internal/config"
 	"main/internal/core"
 	"main/internal/database"
 	"main/internal/locales"
@@ -70,9 +69,7 @@ func handleChatMemberAction(m *telegram.NewMessage) error {
 				m.Reply(F(chatID, "bot_added_normal"))
 				database.AddServedChat(chatID)
 
-				if config.LoggerID != 0 {
-					m.Client.SendMessage(config.LoggerID, F(config.LoggerID, "logger_bot_added", buildLogArgs(m, chatID, "added")))
-				}
+				notifyLoggerBotAdded(m, chatID)
 				return nil
 			}
 		}
@@ -86,9 +83,7 @@ func handleChatMemberAction(m *telegram.NewMessage) error {
 			core.DeleteChatState(chatID)
 			database.RemoveServedChat(chatID)
 
-			if config.LoggerID != 0 {
-				m.Client.SendMessage(config.LoggerID, F(config.LoggerID, "logger_bot_removed", buildLogArgs(m, chatID, "removed")))
-			}
+			notifyLoggerBotRemoved(m, chatID)
 			return nil
 		}
 	}

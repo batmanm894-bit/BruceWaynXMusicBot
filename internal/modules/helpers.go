@@ -376,8 +376,8 @@ func handlePanic(r, ctx any, isPanic bool) {
 
 	gologging.Error(logMsg)
 
-	// Errors go ONLY to the owner's DM, at most once per hour (digest).
-	// The log group is no longer used for errors.
+	// Handler errors/panics go to the group log (LOGGER_ID); the owner's DM
+	// is used only for API-key / cookie alerts.
 	ownerMsg := fmt.Sprintf("%s in %s handler\n<b>From:</b> %s\n%s\n%s\n<b>Error:</b>\n<code>%s</code>",
 		shortPrefix, info.handlerType, info.userMention, info.chatInfo, info.messageInfo, info.errorMessage)
 	if isPanic {
@@ -387,7 +387,9 @@ func handlePanic(r, ctx any, isPanic bool) {
 	if i := strings.IndexByte(firstLine, '\n'); i >= 0 {
 		firstLine = firstLine[:i]
 	}
-	core.NotifyOwner(info.handlerType+"|"+trimRunes(firstLine, 100), ownerMsg)
+	if isLoggerEnabled() {
+		core.NotifyLogger(info.handlerType+"|"+trimRunes(firstLine, 100), ownerMsg)
+	}
 }
 
 // trimRunes cuts s to at most n runes (safe for multi-byte text).
