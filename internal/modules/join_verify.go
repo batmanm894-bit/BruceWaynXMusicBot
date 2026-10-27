@@ -223,12 +223,34 @@ func joinRequestHandler(u tg.Update, client *tg.Client) error {
 		return nil
 	}
 	userID := upd.UserID
-	verifyEnqueue(func() {
-		if err := sendVerifyDM(client, chatID, userID, nil, true); err != nil {
-			gologging.WarnF("join verify: DM to requester %d failed: %v", userID, err)
-		}
-	})
+	verifyEnqueue(func() { sendRequesterDM(client, chatID, userID, 0) })
 	return nil
+}
+
+// Telegram lets the bot DM a join requester right away, but the bot's local
+// cache may not know that user yet ("no peer with id ... or missing from
+// cache"). The cache fills in a moment later, so retry a few times with
+// growing gaps (still well inside Telegram's window for requesters).
+var requesterRetryDelays = []time.Duration{
+	1 * time.Second, 3 * time.Second, 8 * time.Second, 20 * time.Second,
+}
+
+func sendRequesterDM(client *tg.Client, chatID, userID int64, attempt int) {
+	err := sendVerifyDM(client, chatID, userID, nil, true)
+	if err == nil {
+		if attempt > 0 {
+			gologging.InfoF("join verify: DM to requester %d sent on retry %d", userID, attempt)
+		}
+		return
+	}
+	if attempt >= len(requesterRetryDelays) {
+		gologging.WarnF("join verify: DM to requester %d failed after %d retries: %v", userID, attempt, err)
+		return
+	}
+	gologging.DebugF("join verify: DM to requester %d failed (%v), retry %d", userID, err, attempt+1)
+	time.AfterFunc(requesterRetryDelays[attempt], func() {
+		verifyEnqueue(func() { sendRequesterDM(client, chatID, userID, attempt+1) })
+	})
 }
 
 // verifyCB: user pressed "Activate" in the DM -> turn the message into
