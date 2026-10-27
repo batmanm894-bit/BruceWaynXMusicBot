@@ -508,7 +508,12 @@ func raceDownload(
 		}
 
 		errMsg := string(res.platform.Name()) + ": " + res.err.Error()
-		gologging.Error("Race candidate failed: " + errMsg)
+		if errors.Is(res.err, errSaavnNoMatch) || errors.Is(res.err, errSaavnNoSpotify) {
+			// Song just isn't on JioSaavn - normal, not an error.
+			gologging.Debug("Race candidate skipped: " + errMsg)
+		} else {
+			gologging.Error("Race candidate failed: " + errMsg)
+		}
 		errs = append(errs, errMsg)
 	}
 

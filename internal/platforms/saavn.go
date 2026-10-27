@@ -37,13 +37,27 @@ import (
 
 const PlatformSaavn state.PlatformName = "Saavn"
 
+// Expected, non-fatal outcomes (the song simply is not on JioSaavn, or no
+// clean Spotify title exists). They are not real failures, so the race
+// logger shows them at debug level instead of as errors.
+var (
+	errSaavnNoMatch   = errors.New("saavn: no confident match")
+	errSaavnNoSpotify = errors.New("saavn: no Spotify-resolved title available")
+)
+
 // saavnSearchResponse covers the JSON shape returned by the
 // sumitkolhe/jiosaavn-api (a.k.a. saavn.dev) "/api/search/songs" endpoint.
 // Only the fields this platform actually needs are declared.
 type saavnResult struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Duration    json.Number `json:"duration"`
+	ID             string      `json:"id"`
+	Name           string      `json:"name"`
+	Duration       json.Number `json:"duration"`
+	PrimaryArtists string      `json:"primaryArtists"`
+	Artists        struct {
+		Primary []struct {
+			Name string `json:"name"`
+		} `json:"primary"`
+	} `json:"artists"`
 	DownloadURL []struct {
 		Quality string `json:"quality"`
 		URL     string `json:"url"`
@@ -156,6 +170,65 @@ func saavnMatches(track *state.Track, res *saavnResult) bool {
 	return true
 }
 
+// saavnMatchesQuery checks a JioSaavn hit against what the USER typed after
+// /play (not against the YouTube video, which is often a different song or
+// version). It accepts the hit when the song title and the typed words agree
+// and most typed words are found in the title + artist names, so
+// "tum hi ho" gives "Tum Hi Ho" but not just "Tum".
+func saavnMatchesQuery(query string, res *saavnResult) bool {
+	q := saavnTokens(query)
+	name := saavnTokens(res.Name)
+	if len(q) == 0 || len(name) == 0 {
+		return false
+	}
+	qSet := map[string]bool{}
+	for _, w := range q {
+		qSet[w] = true
+	}
+	nameSet := map[string]bool{}
+	for _, w := range name {
+		nameSet[w] = true
+	}
+
+	nameInQuery := true
+	for w := range nameSet {
+		if !qSet[w] {
+			nameInQuery = false
+			break
+		}
+	}
+	queryInName := true
+	for w := range qSet {
+		if !nameSet[w] {
+			queryInName = false
+			break
+		}
+	}
+	if !nameInQuery && !queryInName {
+		return false
+	}
+
+	cand := map[string]bool{}
+	for w := range nameSet {
+		cand[w] = true
+	}
+	for _, w := range saavnTokens(res.PrimaryArtists) {
+		cand[w] = true
+	}
+	for _, a := range res.Artists.Primary {
+		for _, w := range saavnTokens(a.Name) {
+			cand[w] = true
+		}
+	}
+	found := 0
+	for w := range qSet {
+		if cand[w] {
+			found++
+		}
+	}
+	return float64(found)/float64(len(qSet)) >= 0.6
+}
+
 type SaavnPlatform struct {
 	name state.PlatformName
 }
@@ -261,7 +334,19 @@ func (s *SaavnPlatform) resolveDownloadURL(
 	if track.Source == PlatformSpotify {
 		// Already has a clean "Song - Artist" title - a second Spotify
 		// lookup of the same title would be redundant.
-		return s.searchAllBases(ctx, track, track.Title)
+		return s.searchAllBases(ctx, track, track.Title, false)
+	}
+
+	// The user's typed text is the truth. Try it first and accept the
+	// JioSaavn song that matches what they typed (not the YouTube video).
+	if q := strings.TrimSpace(track.Query); q != "" &&
+		q != track.Title && !strings.HasPrefix(strings.ToLower(q), "http") {
+		if u, err := s.searchAllBases(ctx, track, q, true); err == nil {
+			gologging.DebugF("[Saavn] matched user's query %q", q)
+			return u, nil
+		} else {
+			gologging.DebugF("[Saavn] query %q not matched: %v", q, err)
+		}
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -291,14 +376,14 @@ func (s *SaavnPlatform) resolveDownloadURL(
 				"[Saavn] Also trying user's raw query: %q",
 				track.Query,
 			)
-			u, err := s.searchAllBases(ctx, track, track.Query)
+			u, err := s.searchAllBases(ctx, track, track.Query, false)
 			queryCh <- result{u, err}
 		}()
 	}
 
 	pending++
 	go func() {
-		u, err := s.searchAllBases(ctx, track, track.Title)
+		u, err := s.searchAllBases(ctx, track, track.Title, false)
 		rawCh <- result{u, err}
 	}()
 
@@ -306,7 +391,7 @@ func (s *SaavnPlatform) resolveDownloadURL(
 	go func() {
 		betterTitle := SearchTitle(track.Title)
 		if betterTitle == "" || betterTitle == track.Title {
-			spotifyCh <- result{"", errors.New("saavn: no Spotify-resolved title available")}
+			spotifyCh <- result{"", errSaavnNoSpotify}
 			return
 		}
 		gologging.DebugF(
@@ -316,14 +401,14 @@ func (s *SaavnPlatform) resolveDownloadURL(
 		)
 		retryTrack := *track
 		retryTrack.Title = betterTitle
-		u, err := s.searchAllBases(ctx, &retryTrack, betterTitle)
+		u, err := s.searchAllBases(ctx, &retryTrack, betterTitle, false)
 		spotifyCh <- result{u, err}
 	}()
 
 	// select (not a fixed read order) so whichever candidate actually
 	// finishes first with a confident match wins immediately - the rest
 	// are canceled and their results, if they ever arrive, are ignored.
-	var firstErr error
+	var firstErr, spotifyErr error
 	for i := 0; i < pending; i++ {
 		select {
 		case r := <-queryCh:
@@ -331,7 +416,9 @@ func (s *SaavnPlatform) resolveDownloadURL(
 				cancel()
 				return r.url, nil
 			}
-			firstErr = r.err
+			if firstErr == nil {
+				firstErr = r.err
+			}
 		case r := <-rawCh:
 			if r.err == nil {
 				cancel()
@@ -345,12 +432,19 @@ func (s *SaavnPlatform) resolveDownloadURL(
 				cancel()
 				return r.url, nil
 			}
-			if firstErr == nil {
+			// "No Spotify title" says nothing about why Saavn failed, so
+			// keep it only as a last resort and let the real error win.
+			if errors.Is(r.err, errSaavnNoSpotify) {
+				spotifyErr = r.err
+			} else if firstErr == nil {
 				firstErr = r.err
 			}
 		}
 	}
 
+	if firstErr == nil {
+		firstErr = spotifyErr
+	}
 	return "", firstErr
 }
 
@@ -363,6 +457,7 @@ func (s *SaavnPlatform) searchAllBases(
 	ctx context.Context,
 	origTrack *state.Track,
 	title string,
+	byQuery bool,
 ) (string, error) {
 	var lastErr error
 
@@ -403,7 +498,13 @@ func (s *SaavnPlatform) searchAllBases(
 		var mediaURL string
 		for i := range parsed.Data.Results {
 			res := &parsed.Data.Results[i]
-			if !saavnMatches(origTrack, res) {
+			ok := false
+			if byQuery {
+				ok = saavnMatchesQuery(title, res)
+			} else {
+				ok = saavnMatches(origTrack, res)
+			}
+			if !ok {
 				continue
 			}
 			mediaURL = res.bestDownloadURL()
@@ -413,7 +514,7 @@ func (s *SaavnPlatform) searchAllBases(
 		}
 
 		if mediaURL == "" {
-			lastErr = fmt.Errorf("saavn: no confident match for %q on %s", title, base)
+			lastErr = fmt.Errorf("%w for %q on %s", errSaavnNoMatch, title, base)
 			gologging.Debug("Saavn: " + lastErr.Error())
 			continue
 		}
